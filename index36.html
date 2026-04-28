@@ -216,13 +216,11 @@
         }
 
         // -------------------- 云海地面 --------------------
-        // 生成卡通云纹理
         function createCartoonCloudTexture(size = 512, cloudCount = 25) {
             const canvas = document.createElement('canvas');
             canvas.width = size;
             canvas.height = size;
             const ctx = canvas.getContext('2d');
-
             ctx.clearRect(0, 0, size, size);
 
             function drawCloud(cx, cy, baseR) {
@@ -234,16 +232,12 @@
                     [baseR * 0.4, -baseR * 0.7, baseR * 0.75],
                     [0, -baseR * 0.9, baseR * 0.7],
                 ];
-
-                // 描边组（黑色）
                 ctx.fillStyle = '#000000';
                 parts.forEach(([dx, dy, r]) => {
                     ctx.beginPath();
                     ctx.arc(cx + dx, cy + dy, r + 2, 0, Math.PI * 2);
                     ctx.fill();
                 });
-
-                // 填充组（白色）
                 ctx.fillStyle = '#ffffff';
                 parts.forEach(([dx, dy, r]) => {
                     ctx.beginPath();
@@ -259,19 +253,16 @@
                 const r = size * 0.04 + Math.random() * size * 0.06;
                 drawCloud(cx, cy, r);
             }
-
             return new THREE.CanvasTexture(canvas);
         }
 
-        // 创建云海层
         function createCloudLayer(y, repeatCount, speed) {
-            const geometry = new THREE.CircleGeometry(80, 64);
             const texture = createCartoonCloudTexture();
-            
             texture.wrapS = THREE.RepeatWrapping;
             texture.wrapT = THREE.RepeatWrapping;
             texture.repeat.set(repeatCount, repeatCount);
-            
+
+            const geometry = new THREE.CircleGeometry(80, 64);
             const material = new THREE.MeshBasicMaterial({
                 map: texture,
                 transparent: true,
@@ -286,20 +277,14 @@
             return mesh;
         }
 
-        // 两层云海
         const cloudLayer1 = createCloudLayer(0, 25, 0.02);
         const cloudLayer2 = createCloudLayer(0.4, 12, 0.05);
         scene.add(cloudLayer1);
         scene.add(cloudLayer2);
 
-        // 纹理流动偏移
-        const cloudOffset1 = { x: 0, y: 0 };
-        const cloudOffset2 = { x: 0, y: 0 };
-
-        // 标记纹理加载完成
+        const cloudLayers = [cloudLayer1, cloudLayer2];
         loadingResources.texture = true;
         checkAllLoaded();
-        console.log('云海纹理生成完成');
 
         // 添加云朵装饰
         function createCloud(x, y, z, scale = 1) {
@@ -668,9 +653,22 @@
 
         // -------------------- 动画循环 --------------------
         const clock = new THREE.Clock();
+        const tempPos = new THREE.Vector3();
+
+        function updateCloudLayers() {
+            camera.getWorldPosition(tempPos);
+            cloudLayers.forEach(layer => {
+                layer.position.x = tempPos.x;
+                layer.position.z = tempPos.z;
+                const tex = layer.userData.texture;
+                tex.offset.x += layer.userData.speed * 0.016;
+                tex.offset.y += layer.userData.speed * 0.016 * 0.3;
+            });
+        }
+
         function animate() {
             const dt = Math.min(clock.getDelta(), 0.1);
-            
+
             if (renderer.xr.isPresenting) {
                 updateInputs();
                 handleMovement(dt);
@@ -679,27 +677,15 @@
                 updateLasers();
                 handleExit();
                 updateDebugPanel();
+                updateCloudLayers();
                 vrEntryEl.style.display = 'none';
                 vrHintsEl.style.display = 'none';
-                
-                // 云海跟随相机移动 + 纹理流动
-                const camPos = new THREE.Vector3();
-                camera.getWorldPosition(camPos);
-                cloudLayer1.position.x = camPos.x;
-                cloudLayer1.position.z = camPos.z;
-                cloudLayer2.position.x = camPos.x;
-                cloudLayer2.position.z = camPos.z;
-                
-                // 纹理流动
-                cloudLayer1.userData.texture.offset.x += cloudLayer1.userData.speed * dt;
-                cloudLayer1.userData.texture.offset.y += cloudLayer1.userData.speed * dt * 0.3;
-                cloudLayer2.userData.texture.offset.x += cloudLayer2.userData.speed * dt * 0.5;
-                cloudLayer2.userData.texture.offset.y += cloudLayer2.userData.speed * dt * 0.2;
             } else {
+                updateCloudLayers();
                 vrEntryEl.style.display = 'block';
                 vrHintsEl.style.display = 'flex';
             }
-            
+
             renderer.render(scene, camera);
         }
         renderer.setAnimationLoop(animate);
@@ -768,7 +754,11 @@
                         }
                     }
                 });
-                if (groundMat && groundMat.map) groundMat.map.dispose();
+                cloudLayers.forEach(layer => {
+                    if (layer.userData.texture) layer.userData.texture.dispose();
+                    if (layer.material) layer.material.dispose();
+                    if (layer.geometry) layer.geometry.dispose();
+                });
                 dracoLoader.dispose();
             });
         }
