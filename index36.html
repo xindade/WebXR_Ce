@@ -656,10 +656,10 @@
         const tempPos = new THREE.Vector3();
 
         function updateCloudLayers() {
-            camera.getWorldPosition(tempPos);
+            // 云海跟随玩家（dolly），而不是相机
             cloudLayers.forEach(layer => {
-                layer.position.x = tempPos.x;
-                layer.position.z = tempPos.z;
+                layer.position.x = dolly.position.x;
+                layer.position.z = dolly.position.z;
                 const tex = layer.userData.texture;
                 tex.offset.x += layer.userData.speed * 0.016;
                 tex.offset.y += layer.userData.speed * 0.016 * 0.3;
