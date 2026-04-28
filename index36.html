@@ -215,58 +215,91 @@
             }
         }
 
-        // -------------------- 卡通热气球托盘地面 --------------------
-        const textureLoader = new THREE.TextureLoader();
-        let groundMat = null;
+        // -------------------- 云海地面 --------------------
+        // 生成卡通云纹理
+        function createCartoonCloudTexture(size = 512, cloudCount = 25) {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
 
-        textureLoader.load(
-            encodeURI('image/卡通热气球托盘生成 (3).png'),
-            (texture) => {
-                texture.colorSpace = THREE.SRGBColorSpace;
-                texture.wrapS = THREE.RepeatWrapping;
-                texture.wrapT = THREE.RepeatWrapping;
-                
-                groundMat = new THREE.MeshStandardMaterial({
-                    map: texture,
-                    roughness: 0.8,
-                    metalness: 0.1,
-                    side: THREE.DoubleSide
-                });
-                
-                // 更新地面材质
-                if (ground) ground.material = groundMat;
+            ctx.clearRect(0, 0, size, size);
 
-                loadingResources.texture = true;
-                checkAllLoaded();
-                console.log('地面纹理加载成功');
-            },
-            undefined,
-            (error) => {
-                console.error('地面纹理加载失败:', error);
-                // 使用纯色备用材质
-                groundMat = new THREE.MeshStandardMaterial({
-                    color: 0x8B4513,
-                    roughness: 0.9,
-                    metalness: 0.0
+            function drawCloud(cx, cy, baseR) {
+                const parts = [
+                    [0, 0, baseR],
+                    [-baseR * 0.7, -baseR * 0.3, baseR * 0.8],
+                    [baseR * 0.7, -baseR * 0.3, baseR * 0.9],
+                    [-baseR * 0.4, -baseR * 0.7, baseR * 0.7],
+                    [baseR * 0.4, -baseR * 0.7, baseR * 0.75],
+                    [0, -baseR * 0.9, baseR * 0.7],
+                ];
+
+                // 描边组（黑色）
+                ctx.fillStyle = '#000000';
+                parts.forEach(([dx, dy, r]) => {
+                    ctx.beginPath();
+                    ctx.arc(cx + dx, cy + dy, r + 2, 0, Math.PI * 2);
+                    ctx.fill();
                 });
-                if (ground) ground.material = groundMat;
-                loadingResources.texture = true;
-                onResourceError('⚠️ 地面纹理加载失败，已使用备用材质');
+
+                // 填充组（白色）
+                ctx.fillStyle = '#ffffff';
+                parts.forEach(([dx, dy, r]) => {
+                    ctx.beginPath();
+                    ctx.arc(cx + dx, cy + dy, r, 0, Math.PI * 2);
+                    ctx.fill();
+                });
             }
-        );
 
-        const groundGeometry = new THREE.PlaneGeometry(20, 20);
-        // 先使用临时材质，等纹理加载完成后更新
-        const tempMat = new THREE.MeshStandardMaterial({
-            color: 0x8B4513,
-            roughness: 0.9,
-            metalness: 0.0
-        });
-        const ground = new THREE.Mesh(groundGeometry, tempMat);
-        ground.rotation.x = -Math.PI / 2;
-        ground.position.y = 0;
-        ground.receiveShadow = true;
-        scene.add(ground);
+            const margin = size * 0.1;
+            for (let i = 0; i < cloudCount; i++) {
+                const cx = margin + Math.random() * (size - margin * 2);
+                const cy = margin + Math.random() * (size - margin * 2);
+                const r = size * 0.04 + Math.random() * size * 0.06;
+                drawCloud(cx, cy, r);
+            }
+
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        // 创建云海层
+        function createCloudLayer(y, repeatCount, speed) {
+            const geometry = new THREE.CircleGeometry(80, 64);
+            const texture = createCartoonCloudTexture();
+            
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(repeatCount, repeatCount);
+            
+            const material = new THREE.MeshBasicMaterial({
+                map: texture,
+                transparent: true,
+                depthWrite: false,
+                side: THREE.DoubleSide,
+            });
+
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.rotation.x = -Math.PI / 2;
+            mesh.position.y = y;
+            mesh.userData = { speed, texture };
+            return mesh;
+        }
+
+        // 两层云海
+        const cloudLayer1 = createCloudLayer(0, 25, 0.02);
+        const cloudLayer2 = createCloudLayer(0.4, 12, 0.05);
+        scene.add(cloudLayer1);
+        scene.add(cloudLayer2);
+
+        // 纹理流动偏移
+        const cloudOffset1 = { x: 0, y: 0 };
+        const cloudOffset2 = { x: 0, y: 0 };
+
+        // 标记纹理加载完成
+        loadingResources.texture = true;
+        checkAllLoaded();
+        console.log('云海纹理生成完成');
 
         // 添加云朵装饰
         function createCloud(x, y, z, scale = 1) {
@@ -648,6 +681,20 @@
                 updateDebugPanel();
                 vrEntryEl.style.display = 'none';
                 vrHintsEl.style.display = 'none';
+                
+                // 云海跟随相机移动 + 纹理流动
+                const camPos = new THREE.Vector3();
+                camera.getWorldPosition(camPos);
+                cloudLayer1.position.x = camPos.x;
+                cloudLayer1.position.z = camPos.z;
+                cloudLayer2.position.x = camPos.x;
+                cloudLayer2.position.z = camPos.z;
+                
+                // 纹理流动
+                cloudLayer1.userData.texture.offset.x += cloudLayer1.userData.speed * dt;
+                cloudLayer1.userData.texture.offset.y += cloudLayer1.userData.speed * dt * 0.3;
+                cloudLayer2.userData.texture.offset.x += cloudLayer2.userData.speed * dt * 0.5;
+                cloudLayer2.userData.texture.offset.y += cloudLayer2.userData.speed * dt * 0.2;
             } else {
                 vrEntryEl.style.display = 'block';
                 vrHintsEl.style.display = 'flex';
