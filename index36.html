@@ -96,16 +96,32 @@
         const vrEntryEl = document.getElementById('vr-entry');
         const loadingEl = document.getElementById('loading');
 
-        // -------------------- 加载兜底超时（防止资源加载失败导致永远卡住）--------------------
+        // -------------------- 加载状态管理 --------------------
+        const loadingResources = { texture: false, model: false };
         let loadingHidden = false;
-        function hideLoadingOnce(msg) {
+
+        function checkAllLoaded(msg) {
             if (loadingHidden) return;
-            loadingHidden = true;
-            if (msg) loadingEl.innerHTML = '<div style="color:#ffaa00;">' + msg + '</div>';
-            setTimeout(() => { loadingEl.style.display = 'none'; }, 1500);
+            if (msg) {
+                loadingEl.innerHTML = '<div style="color:#ffaa00;">' + msg + '</div>';
+                setTimeout(() => { loadingEl.style.display = 'none'; loadingHidden = true; }, 1500);
+                return;
+            }
+            if (loadingResources.texture && loadingResources.model) {
+                loadingHidden = true;
+                loadingEl.style.display = 'none';
+            }
         }
+
+        function onResourceError(msg) {
+            loadingEl.innerHTML = '<div style="color:#ffaa00;">' + msg + '</div>';
+            setTimeout(() => { loadingEl.style.display = 'none'; loadingHidden = true; }, 2000);
+        }
+
         // 最长等待 15 秒后强制关闭
-        setTimeout(() => hideLoadingOnce('⚠️ 加载超时，检查 HTTP 服务器是否运行中...'), 15000);
+        setTimeout(() => {
+            if (!loadingHidden) onResourceError('⚠️ 加载超时，检查 HTTP 服务器是否运行中...');
+        }, 15000);
 
         // 摇杆和输入状态
         const rightInput = { stickX: 0, stickY: 0 };
@@ -200,41 +216,57 @@
         }
 
         // -------------------- 卡通热气球托盘地面 --------------------
-        const groundGeometry = new THREE.PlaneGeometry(20, 20);
-        const groundMat = new THREE.MeshStandardMaterial({
-            color: 0x8B4513,
-            roughness: 0.9,
-            metalness: 0.0
-        });
-        const ground = new THREE.Mesh(groundGeometry, groundMat);
-        ground.rotation.x = -Math.PI / 2;
-        ground.position.y = 0;
-        ground.receiveShadow = true;
-        scene.add(ground);
-
-        // 异步加载纹理（纹理文件较大，可能需要较长时间）
         const textureLoader = new THREE.TextureLoader();
-        textureLoader.manager.onLoad = () => {
-            console.log('地面纹理加载完成');
-            hideLoadingOnce();
-        };
-        textureLoader.manager.onError = (url) => {
-            console.error('地面纹理加载失败:', url);
-            hideLoadingOnce('⚠️ 地面纹理加载失败');
-        };
-        
-        const groundTexture = textureLoader.load(
-            'image/卡通热气球托盘生成 (3).png',
+        let groundMat = null;
+
+        textureLoader.load(
+            encodeURI('image/卡通热气球托盘生成 (3).png'),
             (texture) => {
                 texture.colorSpace = THREE.SRGBColorSpace;
                 texture.wrapS = THREE.RepeatWrapping;
                 texture.wrapT = THREE.RepeatWrapping;
-                texture.flipY = false;
-                groundMat.map = texture;
-                groundMat.color.setHex(0xFFFFFF); // 白色让纹理原始显示
-                groundMat.needsUpdate = true;
+                
+                groundMat = new THREE.MeshStandardMaterial({
+                    map: texture,
+                    roughness: 0.8,
+                    metalness: 0.1,
+                    side: THREE.DoubleSide
+                });
+                
+                // 更新地面材质
+                if (ground) ground.material = groundMat;
+
+                loadingResources.texture = true;
+                checkAllLoaded();
+                console.log('地面纹理加载成功');
+            },
+            undefined,
+            (error) => {
+                console.error('地面纹理加载失败:', error);
+                // 使用纯色备用材质
+                groundMat = new THREE.MeshStandardMaterial({
+                    color: 0x8B4513,
+                    roughness: 0.9,
+                    metalness: 0.0
+                });
+                if (ground) ground.material = groundMat;
+                loadingResources.texture = true;
+                onResourceError('⚠️ 地面纹理加载失败，已使用备用材质');
             }
         );
+
+        const groundGeometry = new THREE.PlaneGeometry(20, 20);
+        // 先使用临时材质，等纹理加载完成后更新
+        const tempMat = new THREE.MeshStandardMaterial({
+            color: 0x8B4513,
+            roughness: 0.9,
+            metalness: 0.0
+        });
+        const ground = new THREE.Mesh(groundGeometry, tempMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = 0;
+        ground.receiveShadow = true;
+        scene.add(ground);
 
         // 添加云朵装饰
         function createCloud(x, y, z, scale = 1) {
@@ -277,13 +309,15 @@
 
         // -------------------- 激光射线 --------------------
         function updateLasers() {
-            for (let c of controllers) {
-                if (!c || !c.userData) continue;
-                const laser = c.userData.laser;
-                if (!laser) continue;
-                laser.scale.set(1, 30, 1);
-                laser.position.set(0, 0, -0.15);
-            }
+            [leftGrip, rightGrip].forEach(grip => {
+                if (!grip) return;
+                grip.traverse(child => {
+                    if (child.userData && child.userData.laser) {
+                        child.scale.set(1, 30, 1);
+                        child.position.set(0, 0, -0.15);
+                    }
+                });
+            });
         }
 
         // -------------------- 调试 UI 面板（右手腕 3D Canvas） --------------------
@@ -374,13 +408,13 @@
             const toDeg = r => (r * 180 / Math.PI).toFixed(1);
             const toM = v => v.toFixed(2);
 
-            const modelStatus = ak47Model ? '模型:✅' : '模型:⏳';
-            const attachStatus = ak47Attached ? '挂载:✅' : '挂载:❌';
+            const modelStatus = ak48Model ? '模型:✅' : '模型:⏳';
+            const attachStatus = ak48Attached ? '挂载:✅' : '挂载:❌';
             const info = [
                 `Pos  X:${toM(wp.x)} Y:${toM(wp.y)} Z:${toM(wp.z)}`,
                 `Rot  X:${toDeg(wr.x)}° Y:${toDeg(wr.y)}°`,
                 `     Z:${toDeg(wr.z)}°`,
-                `AK47  ${modelStatus} ${attachStatus}`
+                `AK48  ${modelStatus} ${attachStatus}`
             ].join('\n');
 
             drawDebugPanel(info);
@@ -389,8 +423,8 @@
         // -------------------- 手柄模型 --------------------
         const controllers = [];
         let leftController, rightController;
-        let ak47Model = null;
-        let ak47Attached = false;
+        let ak48Model = null;
+        let ak48Attached = false;
         let rightGrip = null, leftGrip = null;
 
         // 加载 AK48 枪支模型（Draco 压缩版本）
@@ -404,16 +438,17 @@
             'Ak48.glb',
             (gltf) => {
                 console.log('✅ Ak48.glb 加载成功');
-                ak47Model = gltf.scene;
-                ak47Model.scale.set(1, 1, 1);
-                ak47Model.traverse((child) => {
+                ak48Model = gltf.scene;
+                ak48Model.scale.set(1, 1, 1);
+                ak48Model.traverse((child) => {
                     if (child.isMesh) {
                         child.castShadow = true;
                         child.receiveShadow = true;
                     }
                 });
-                attachAK47();
-                hideLoadingOnce();
+                attachAK48();
+                loadingResources.model = true;
+                checkAllLoaded();
             },
             (progress) => {
                 if (progress.total > 0) {
@@ -424,7 +459,8 @@
             },
             (error) => {
                 console.error('❌ 模型加载失败:', error);
-                hideLoadingOnce('⚠️ 模型加载失败');
+                loadingResources.model = true;
+                onResourceError('⚠️ 模型加载失败');
             }
         );
 
@@ -474,7 +510,7 @@
             
             if (idx === 1) {
                 rightGrip = grip;
-                attachAK47();
+                attachAK48();
                 // 调试面板挂到右手腕
                 const panel = createDebugPanel();
                 grip.add(panel);
@@ -487,31 +523,31 @@
         }
 
         // -------------------- 枪支缩放配置（修改这里调整大小） --------------------
-        // 0.01 = 原始大小的1%，0.1 = 原始大小的10%
-        const AK47_SCALE = 0.6;  // ← 调整这个数字来改变枪的大小
+        // 当前值 0.6 = 原始大小的 60%，可根据实际模型大小调整
+        const AK48_SCALE = 0.6;  // ← 调整这个数字来改变枪的大小
 
-        // 附加 AK47 到右手柄
-        function attachAK47() {
-            console.log('attachAK47 被调用', { 
-                hasModel: !!ak47Model, 
+        // 附加 AK48 到右手柄
+        function attachAK48() {
+            console.log('attachAK48 被调用', { 
+                hasModel: !!ak48Model, 
                 hasRightGrip: !!rightGrip, 
-                alreadyAttached: ak47Attached 
+                alreadyAttached: ak48Attached 
             });
             
-            if (!ak47Model) { console.log('AK47 模型尚未加载，跳过'); return; }
+            if (!ak48Model) { console.log('AK48 模型尚未加载，跳过'); return; }
             if (!rightGrip) { console.log('右手柄尚未初始化，跳过'); return; }
-            if (ak47Attached) { console.log('AK47 已附加，跳过'); return; }
+            if (ak48Attached) { console.log('AK48 已附加，跳过'); return; }
             
-            const gunInstance = ak47Model.clone();
+            const gunInstance = ak48Model.clone();
             
             // 计算原始尺寸并应用缩放
             const box = new THREE.Box3().setFromObject(gunInstance);
             const size = new THREE.Vector3();
             box.getSize(size);
-            console.log('AK47 原始尺寸:', size.x.toFixed(3), size.y.toFixed(3), size.z.toFixed(3));
-            console.log('AK47 当前缩放值:', AK47_SCALE, '→ 缩放后长度约:', (Math.max(size.x, size.y, size.z) * AK47_SCALE).toFixed(3), '米');
+            console.log('AK48 原始尺寸:', size.x.toFixed(3), size.y.toFixed(3), size.z.toFixed(3));
+            console.log('AK48 当前缩放值:', AK48_SCALE, '→ 缩放后长度约:', (Math.max(size.x, size.y, size.z) * AK48_SCALE).toFixed(3), '米');
             
-            gunInstance.scale.set(AK47_SCALE, AK47_SCALE, AK47_SCALE);
+            gunInstance.scale.set(AK48_SCALE, AK48_SCALE, AK48_SCALE);
             
             gunInstance.traverse((child) => {
                 if (child.isMesh) child.castShadow = true;
@@ -521,12 +557,12 @@
             gunInstance.position.set(0, 0, -0.12);
             
             rightGrip.add(gunInstance);
-            ak47Attached = true;
-            console.log('AK47 已成功附加到右手柄');
+            ak48Attached = true;
+            console.log('AK48 已成功附加到右手柄');
         }
 
         renderer.xr.addEventListener('sessionstart', () => {
-            setTimeout(() => { attachAK47(); }, 100);
+            setTimeout(() => { attachAK48(); }, 100);
         });
 
         // -------------------- 输入处理 --------------------
@@ -679,6 +715,23 @@
                 camera.aspect = window.innerWidth / window.innerHeight;
                 camera.updateProjectionMatrix();
                 renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            // 页面卸载时清理资源
+            window.addEventListener('beforeunload', () => {
+                renderer.dispose();
+                scene.traverse(obj => {
+                    if (obj.geometry) obj.geometry.dispose();
+                    if (obj.material) {
+                        if (Array.isArray(obj.material)) {
+                            obj.material.forEach(m => m.dispose());
+                        } else {
+                            obj.material.dispose();
+                        }
+                    }
+                });
+                if (groundMat && groundMat.map) groundMat.map.dispose();
+                dracoLoader.dispose();
             });
         }
 
