@@ -201,31 +201,50 @@
 
         // -------------------- 卡通热气球托盘地面 --------------------
         const textureLoader = new THREE.TextureLoader();
-        const groundTexture = textureLoader.load(
+        let groundMat = null;
+
+        textureLoader.load(
             'image/卡通热气球托盘生成 (3).png',
             (texture) => {
                 texture.colorSpace = THREE.SRGBColorSpace;
                 texture.wrapS = THREE.RepeatWrapping;
                 texture.wrapT = THREE.RepeatWrapping;
+                
+                groundMat = new THREE.MeshStandardMaterial({
+                    map: texture,
+                    roughness: 0.8,
+                    metalness: 0.1,
+                    side: THREE.DoubleSide
+                });
+                
+                // 更新地面材质
+                if (ground) ground.material = groundMat;
+                
                 hideLoadingOnce();
                 console.log('地面纹理加载成功');
             },
             undefined,
             (error) => {
                 console.error('地面纹理加载失败:', error);
+                // 使用纯色备用材质
+                groundMat = new THREE.MeshStandardMaterial({
+                    color: 0x8B4513,
+                    roughness: 0.9,
+                    metalness: 0.0
+                });
+                if (ground) ground.material = groundMat;
                 hideLoadingOnce('⚠️ 地面纹理加载失败');
             }
         );
 
-        const groundMat = new THREE.MeshStandardMaterial({
-            map: groundTexture,
-            roughness: 0.8,
-            metalness: 0.1,
-            color: 0xD2B48C
-        });
-
         const groundGeometry = new THREE.PlaneGeometry(20, 20);
-        const ground = new THREE.Mesh(groundGeometry, groundMat);
+        // 先使用临时材质，等纹理加载完成后更新
+        const tempMat = new THREE.MeshStandardMaterial({
+            color: 0x8B4513,
+            roughness: 0.9,
+            metalness: 0.0
+        });
+        const ground = new THREE.Mesh(groundGeometry, tempMat);
         ground.rotation.x = -Math.PI / 2;
         ground.position.y = 0;
         ground.receiveShadow = true;
