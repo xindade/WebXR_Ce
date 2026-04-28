@@ -127,6 +127,9 @@
         const rightInput = { stickX: 0, stickY: 0 };
         const leftInput = { stickX: 0, stickY: 0 };
 
+        // 云海滚动速度（由摇杆控制）
+        const cloudScroll = { x: 0, y: 0 };
+
         const MOVE_SPEED = 3.5;
         const DEADZONE = 0.2;
         const SHOOT_COOLDOWN = 150; // 射击冷却时间(ms)
@@ -619,22 +622,30 @@
             if (Math.abs(sx) < DEADZONE && Math.abs(sy) < DEADZONE) {
                 sx = leftInput.stickX; sy = leftInput.stickY;
             }
-            if (Math.abs(sx) < DEADZONE && Math.abs(sy) < DEADZONE) return;
-            
+            if (Math.abs(sx) < DEADZONE && Math.abs(sy) < DEADZONE) {
+                // 摇杆回中，云海滚动逐渐减速
+                cloudScroll.x *= 0.92;
+                cloudScroll.y *= 0.92;
+                return;
+            }
+
             const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
             forward.y = 0; forward.normalize();
             const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
             right.y = 0; right.normalize();
-            
-            const moveDir = new THREE.Vector3()
-                .addScaledVector(forward, -sy)
-                .addScaledVector(right, sx)
-                .normalize();
-            const speed = MOVE_SPEED * Math.max(Math.abs(sx), Math.abs(sy));
-            dolly.position.addScaledVector(moveDir, speed * dt);
-            
-            dolly.position.x = Math.min(8, Math.max(-8, dolly.position.x));
-            dolly.position.z = Math.min(8, Math.max(-8, dolly.position.z));
+
+            // 摇杆控制云海滚动方向和速度（摇杆前推 = 云向身后流 = 向前飞的错觉）
+            const intensity = Math.max(Math.abs(sx), Math.abs(sy));
+            const scrollSpeed = 2.0 * intensity;
+            cloudScroll.x = (forward.x * sy + right.x * sx) * scrollSpeed;
+            cloudScroll.y = (forward.z * sy + right.z * sx) * scrollSpeed;
+
+            // 玩家只在极小的范围内轻微晃动，模拟热气球颠簸感
+            const swaySpeed = 0.5;
+            dolly.position.x += (Math.random() - 0.5) * swaySpeed * dt * intensity;
+            dolly.position.z += (Math.random() - 0.5) * swaySpeed * dt * intensity;
+            dolly.position.x = Math.min(0.3, Math.max(-0.3, dolly.position.x));
+            dolly.position.z = Math.min(0.3, Math.max(-0.3, dolly.position.z));
         }
 
         function handleExit() {
@@ -655,14 +666,18 @@
         const clock = new THREE.Clock();
         const tempPos = new THREE.Vector3();
 
-        function updateCloudLayers() {
-            // 云海跟随玩家（dolly），而不是相机
-            cloudLayers.forEach(layer => {
-                layer.position.x = dolly.position.x;
-                layer.position.z = dolly.position.z;
+        function updateCloudLayers(dt) {
+            camera.getWorldPosition(tempPos);
+            cloudLayers.forEach((layer, idx) => {
+                // 云海平滑跟随相机，但允许有轻微的滞后感
+                layer.position.x += (tempPos.x - layer.position.x) * 0.05;
+                layer.position.z += (tempPos.z - layer.position.z) * 0.05;
+
                 const tex = layer.userData.texture;
-                tex.offset.x += layer.userData.speed * 0.016;
-                tex.offset.y += layer.userData.speed * 0.016 * 0.3;
+                // 摇杆控制纹理滚动：不同层速度不同形成视差
+                const parallax = idx === 0 ? 1.0 : 0.6;
+                tex.offset.x += cloudScroll.x * dt * parallax;
+                tex.offset.y += cloudScroll.y * dt * parallax;
             });
         }
 
@@ -677,11 +692,11 @@
                 updateLasers();
                 handleExit();
                 updateDebugPanel();
-                updateCloudLayers();
+                updateCloudLayers(dt);
                 vrEntryEl.style.display = 'none';
                 vrHintsEl.style.display = 'none';
             } else {
-                updateCloudLayers();
+                updateCloudLayers(dt);
                 vrEntryEl.style.display = 'block';
                 vrHintsEl.style.display = 'flex';
             }
