@@ -466,20 +466,26 @@
 
         function createControllerModel(isRight) {
             const group = new THREE.Group();
-            
-            // 激光射线
+
+            const trigger = new THREE.Mesh(
+                new THREE.BoxGeometry(0.025, 0.02, 0.04),
+                new THREE.MeshStandardMaterial({ color: 0x888888 })
+            );
+            trigger.position.set(0, -0.03, 0.04);
+            group.add(trigger);
+
             const laserGeo = new THREE.CylinderGeometry(0.003, 0.003, 1, 8);
             laserGeo.rotateX(Math.PI / 2);
-            const laserMat = new THREE.MeshBasicMaterial({ 
-                color: isRight ? 0xff3333 : 0x33aaff, 
-                transparent: true, 
-                opacity: 0.7 
+            const laserMat = new THREE.MeshBasicMaterial({
+                color: isRight ? 0xff3333 : 0x33aaff,
+                transparent: true,
+                opacity: 0.7
             });
             const laser = new THREE.Mesh(laserGeo, laserMat);
             laser.position.set(0, 0, -0.1);
             group.add(laser);
             group.userData.laser = laser;
-            
+
             return group;
         }
 
@@ -537,10 +543,9 @@
                 if (child.isMesh) child.castShadow = true;
             });
             
-            // 枪管朝前，放置在手柄前方
-            // Y旋转90度，Y位置减少0.1
-            gunInstance.rotation.y = Math.PI / 2;
+            // 枪管朝前，放置在手柄前方，Y 轴旋转 90°，位置下沉 0.1
             gunInstance.position.set(0, -0.1, -0.12);
+            gunInstance.rotation.y = Math.PI / 2;
             
             rightGrip.add(gunInstance);
             ak48Attached = true;
