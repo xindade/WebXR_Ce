@@ -101,10 +101,10 @@
             if (loadingHidden) return;
             loadingHidden = true;
             if (msg) loadingEl.innerHTML = '<div style="color:#ffaa00;">' + msg + '</div>';
-            setTimeout(() => { loadingEl.style.display = 'none'; }, 1500);
+            setTimeout(() => { loadingEl.style.display = 'none'; }, 2000);
         }
-        // 最长等待 15 秒后强制关闭
-        setTimeout(() => hideLoadingOnce('⚠️ 加载超时，检查 HTTP 服务器是否运行中...'), 15000);
+        // 无压缩模型约28MB，PICO浏览器加载慢，最长等待90秒
+        setTimeout(() => hideLoadingOnce('⚠️ 加载超时，请检查HTTP服务器是否运行中...'), 90000);
 
         // 摇杆和输入状态
         const rightInput = { stickX: 0, stickY: 0 };
@@ -407,8 +407,12 @@
             (progress) => {
                 if (progress.total > 0) {
                     const pct = (progress.loaded / progress.total * 100).toFixed(1);
-                    document.getElementById('loading').innerHTML = 
-                        '<div id="loading-spinner"></div><div>加载模型: ' + pct + '%</div>';
+                    const loadedMB = (progress.loaded / 1024 / 1024).toFixed(2);
+                    const totalMB = (progress.total / 1024 / 1024).toFixed(2);
+                    loadingEl.innerHTML = 
+                        '<div id="loading-spinner"></div>' +
+                        '<div style="color:#ffd700;">加载模型: ' + pct + '%</div>' +
+                        '<div style="font-size:14px;color:#aaa;">' + loadedMB + ' / ' + totalMB + ' MB</div>';
                 }
             },
             (error) => {
