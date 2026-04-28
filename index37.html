@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>VR 热气球托盘场景 - Ak48压缩版</title>
+    <title>VR 热气球托盘场景 - Ak47无压缩版</title>
     <style>
         :root { --bg: #1a1a2e; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -87,7 +87,6 @@
     <script type="module">
         import * as THREE from 'three';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-        import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
         // DOM 元素
         const enterVRBtn = document.getElementById('enter-vr-btn');
@@ -388,17 +387,12 @@
         let ak47Attached = false;
         let rightGrip = null, leftGrip = null;
 
-        // 加载 AK48 枪支模型（Draco 压缩版本）
-        const dracoLoader = new DRACOLoader();
-        dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-        dracoLoader.setDecoderConfig({ type: 'js' });  // 强制使用 JS 解码器
-
+        // 加载 AK47 枪支模型（无压缩版本，无 Draco 依赖）
         const gltfLoader = new GLTFLoader();
-        gltfLoader.setDRACOLoader(dracoLoader);
         gltfLoader.load(
-            'Ak48.glb',
+            'Ak47.glb',
             (gltf) => {
-                console.log('✅ Ak48.glb 加载成功');
+                console.log('✅ Ak47.glb 加载成功');
                 ak47Model = gltf.scene;
                 ak47Model.scale.set(1, 1, 1);
                 ak47Model.traverse((child) => {
