@@ -466,24 +466,8 @@
 
         function createControllerModel(isRight) {
             const group = new THREE.Group();
-            const body = new THREE.Mesh(
-                new THREE.BoxGeometry(0.045, 0.06, 0.1),
-                new THREE.MeshStandardMaterial({ 
-                    color: isRight ? 0xcc4444 : 0x44cc44, 
-                    roughness: 0.5, 
-                    metalness: 0.6 
-                })
-            );
-            body.position.set(0, 0, 0);
-            group.add(body);
             
-            const trigger = new THREE.Mesh(
-                new THREE.BoxGeometry(0.025, 0.02, 0.04),
-                new THREE.MeshStandardMaterial({ color: 0x888888 })
-            );
-            trigger.position.set(0, -0.03, 0.04);
-            group.add(trigger);
-            
+            // 激光射线
             const laserGeo = new THREE.CylinderGeometry(0.003, 0.003, 1, 8);
             laserGeo.rotateX(Math.PI / 2);
             const laserMat = new THREE.MeshBasicMaterial({ 
@@ -554,7 +538,9 @@
             });
             
             // 枪管朝前，放置在手柄前方
-            gunInstance.position.set(0, 0, -0.12);
+            // Y旋转90度，Y位置减少0.1
+            gunInstance.rotation.y = Math.PI / 2;
+            gunInstance.position.set(0, -0.1, -0.12);
             
             rightGrip.add(gunInstance);
             ak48Attached = true;
