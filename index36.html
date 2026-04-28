@@ -178,7 +178,22 @@
         const BULLET_LIFE = 3;
 
         function shootBullet(controller) {
-            const muzzleLocal = new THREE.Vector3(0, 0, -0.2);
+            //
+            // 【参数4】muzzleLocal —— 子弹出口位置 (相对于右手柄的局部坐标, 单位: 米)
+            //   格式: new THREE.Vector3(X, Y, Z)
+            //   X (左右): 正值=右侧, 负值=左侧  —— 当前: 0
+            //   Y (上下): 正值=上方, 负值=下方  —— 当前: 0
+            //   Z (前后): 正值=身后方, 负值=身前方 —— 当前: -0.2 (枪口前方0.2米处)
+            //
+            //   ⚠️ 重要: 这个值应该和枪模型的枪口位置对齐！
+            //   如果子弹从枪中间射出 → 调 Z 让出口更靠前 (如 -0.3, -0.4)
+            //   如果子弹从枪后面射出 → 调 Z 让出口更靠后 (如 -0.1, 0)
+            //   如果子弹偏上/偏下 → 调 Y
+            //   如果子弹偏左/偏右 → 调 X
+            //
+            const muzzleLocal = new THREE.Vector3(0, 0, -0.6);
+            //
+            // 下面几行是把局部坐标转换成世界坐标, 一般不用改
             const origin = muzzleLocal.clone().applyMatrix4(controller.matrixWorld);
             const quat = controller.getWorldQuaternion(new THREE.Quaternion());
             const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(quat);
@@ -334,6 +349,16 @@
                 if (!grip) return;
                 grip.traverse(child => {
                     if (child.userData && child.userData.laser) {
+<<<<<<< HEAD
+=======
+                        //
+                        // 【参数7】激光射线实时更新 —— 每帧调整激光长度和位置
+                        //   child.scale.set(1, 长度, 1): Y轴缩放 = 激光射多远
+                        //     当前: 30 = 激光向前延伸30米
+                        //   child.position.set(X, Y, Z): 激光中心点位置
+                        //     当前: (0, 0, -0.15) = 从手柄前0.15米处作为中心,向前后各延伸15米
+                        //
+>>>>>>> d188d95 (枪支位置调整)
                         child.scale.set(1, 30, 1);
                         child.position.set(0, 0, -0.15);
                     }
@@ -365,7 +390,14 @@
             });
             debugPanel = new THREE.Mesh(panelGeo, panelMat);
 
-            // 手腕背侧，稍微倾斜让玩家翻腕可见
+            //
+            // 【参数5】调试面板位置/角度 —— VR中右手腕上的DEBUG信息面板
+            //   position.set(X, Y, Z): 相对于右手柄的位移 (单位: 米)
+            //     当前: (0, 0.06, 0.04) —— 在手腕背侧上方
+            //   rotation.x: 面板绕X轴倾斜角度
+            //     当前: -Math.PI * 0.35 ≈ -63° —— 面板倾斜朝向玩家眼睛
+            //   如果面板位置不对/看不到 → 可修改下方两个值
+            //
             debugPanel.position.set(0, 0.06, 0.04);
             debugPanel.rotation.x = -Math.PI * 0.35;
 
@@ -498,6 +530,15 @@
                     opacity: 0.7
                 });
                 const laser = new THREE.Mesh(laserGeo, laserMat);
+<<<<<<< HEAD
+=======
+                //
+                // 【参数6】激光射线起始位置 —— 红色细线从手柄射出
+                //   position.set(X, Y, Z): 相对于手柄的偏移 (单位: 米)
+                //   Z: -0.1 = 从手柄前端0.1米处开始射出
+                //   如需调整激光起点位置可修改下方值
+                //
+>>>>>>> d188d95 (枪支位置调整)
                 laser.position.set(0, 0, -0.1);
                 group.add(laser);
                 group.userData.laser = laser;
@@ -529,9 +570,22 @@
             else rightController = controller;
         }
 
+<<<<<<< HEAD
         // -------------------- 枪支缩放配置（修改这里调整大小） --------------------
         // 当前值 0.6 = 原始大小的 60%，可根据实际模型大小调整
         const AK48_SCALE = 0.6;  // ← 调整这个数字来改变枪的大小
+=======
+        // ==================== 枪支参数配置区（手动修改下方参数） ====================
+        //
+        // 【参数1】AK48_SCALE —— 枪的整体缩放比例
+        //   作用: 控制枪模型整体大小
+        //   当前值: 0.6 = 原始大小的 60%
+        //   调节建议: 枪太大挡视野就调小(如0.4)，枪太小看不清就调大(如0.8)
+        //
+        const AK48_SCALE = 0.6;  // ← 改这个数字调整枪的整体大小
+        //
+        // ===========================================================================
+>>>>>>> d188d95 (枪支位置调整)
 
         // 附加 AK48 到右手柄
         function attachAK48() {
@@ -560,10 +614,37 @@
                 if (child.isMesh) child.castShadow = true;
             });
             
+<<<<<<< HEAD
             // 枪管朝前，放置在手柄前方，Y 轴旋转 90°，位置下沉 0.1
             gunInstance.position.set(0, -0.1, -0.09);
             gunInstance.rotation.x = -20;
             gunInstance.rotation.y = Math.PI / 2;
+=======
+            //
+            // 【参数2】gunInstance.position —— 枪相对于右手柄的位移 (单位: 米)
+            //   格式: .set(X, Y, Z)
+            //   X (左右): 正值=向右移, 负值=向左移  —— 当前: 0
+            //   Y (上下): 正值=向上移, 负值=向下移  —— 当前: -0.1 (枪下沉,避免挡手)
+            //   Z (前后): 正值=向身后, 负值=向身前  —— 当前: -0.12 (枪管朝前伸出)
+            //   调节建议: 枪太高挡视线就调小Y, 枪伸太远就调Z closer to 0
+            //
+            gunInstance.position.set(0, -0.15, -0.12);
+            //
+            // 【参数3】gunInstance.rotation —— 枪相对于右手柄的旋转 (单位: 弧度)
+            //   格式: .x / .y / .z = 绕各轴旋转的角度
+            //   X轴 (俯仰): 正值=枪口上抬, 负值=枪口下压  —— 当前: 0
+            //   Y轴 (左右偏航): 正值=向左转, 负值=向右转  —— 当前: Math.PI/2 = 90°
+            //   Z轴 (侧倾/翻滚): 正值=顺时针倾斜, 负值=逆时针  —— 当前: 0 (未写,默认0)
+            //   调节建议:
+            //     - 枪拿反了/方向不对 → 调 Y (常用值: 0, Math.PI/2, Math.PI, -Math.PI/2)
+            //     - 枪管朝天/朝地 → 调 X
+            //     - 枪身歪了 → 调 Z
+            //   弧度→角度换算: Math.PI = 180°, Math.PI/2 = 90°, Math.PI/4 = 45°
+            //
+            gunInstance.rotation.x = 0;
+            gunInstance.rotation.y = Math.PI / 2;
+            // gunInstance.rotation.z = 0;  // 如需侧倾可取消注释并修改
+>>>>>>> d188d95 (枪支位置调整)
             
             rightGrip.add(gunInstance);
             ak48Attached = true;
