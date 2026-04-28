@@ -200,55 +200,41 @@
         }
 
         // -------------------- 卡通热气球托盘地面 --------------------
-        const textureLoader = new THREE.TextureLoader();
-        let groundMat = null;
+        const groundGeometry = new THREE.PlaneGeometry(20, 20);
+        const groundMat = new THREE.MeshStandardMaterial({
+            color: 0x8B4513,
+            roughness: 0.9,
+            metalness: 0.0
+        });
+        const ground = new THREE.Mesh(groundGeometry, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = 0;
+        ground.receiveShadow = true;
+        scene.add(ground);
 
-        textureLoader.load(
+        // 异步加载纹理（纹理文件较大，可能需要较长时间）
+        const textureLoader = new THREE.TextureLoader();
+        textureLoader.manager.onLoad = () => {
+            console.log('地面纹理加载完成');
+            hideLoadingOnce();
+        };
+        textureLoader.manager.onError = (url) => {
+            console.error('地面纹理加载失败:', url);
+            hideLoadingOnce('⚠️ 地面纹理加载失败');
+        };
+        
+        const groundTexture = textureLoader.load(
             'image/卡通热气球托盘生成 (3).png',
             (texture) => {
                 texture.colorSpace = THREE.SRGBColorSpace;
                 texture.wrapS = THREE.RepeatWrapping;
                 texture.wrapT = THREE.RepeatWrapping;
-                
-                groundMat = new THREE.MeshStandardMaterial({
-                    map: texture,
-                    roughness: 0.8,
-                    metalness: 0.1,
-                    side: THREE.DoubleSide
-                });
-                
-                // 更新地面材质
-                if (ground) ground.material = groundMat;
-                
-                hideLoadingOnce();
-                console.log('地面纹理加载成功');
-            },
-            undefined,
-            (error) => {
-                console.error('地面纹理加载失败:', error);
-                // 使用纯色备用材质
-                groundMat = new THREE.MeshStandardMaterial({
-                    color: 0x8B4513,
-                    roughness: 0.9,
-                    metalness: 0.0
-                });
-                if (ground) ground.material = groundMat;
-                hideLoadingOnce('⚠️ 地面纹理加载失败');
+                texture.flipY = false;
+                groundMat.map = texture;
+                groundMat.color.setHex(0xFFFFFF); // 白色让纹理原始显示
+                groundMat.needsUpdate = true;
             }
         );
-
-        const groundGeometry = new THREE.PlaneGeometry(20, 20);
-        // 先使用临时材质，等纹理加载完成后更新
-        const tempMat = new THREE.MeshStandardMaterial({
-            color: 0x8B4513,
-            roughness: 0.9,
-            metalness: 0.0
-        });
-        const ground = new THREE.Mesh(groundGeometry, tempMat);
-        ground.rotation.x = -Math.PI / 2;
-        ground.position.y = 0;
-        ground.receiveShadow = true;
-        scene.add(ground);
 
         // 添加云朵装饰
         function createCloud(x, y, z, scale = 1) {
