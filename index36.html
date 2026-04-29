@@ -170,30 +170,86 @@
         scene.add(sunLight);
         scene.add(new THREE.HemisphereLight(0x87CEEB, 0x90EE90, 0.8));
 
-        // -------------------- 子弹系统 --------------------
+        // ==================== 子弹系统配置 ====================
+        /*  子弹参数速查表（修改下方数值即可调整）
+            --------------------------------------------------
+            发射口位置(相对于右手控制器):  muzzleLocal (0, 0, -0.2)
+                                           X=0      左右偏移
+                                           Y=0      上下偏移
+                                           Z=-0.2   前后偏移（负=前方）
+            --------------------------------------------------
+            子弹大小:                      SphereGeometry(0.03, 8, 8)
+                                           0.03 = 半径（米）
+            --------------------------------------------------
+            子弹颜色:                      color: 0xffaa00 (橙黄)
+                                           emissive: 0xff4400 (发光橙红)
+                                           emissiveIntensity: 0.8 (发光强度)
+            --------------------------------------------------
+            子弹速度:                      BULLET_SPEED = 15 (米/秒)
+            --------------------------------------------------
+            子弹寿命:                      BULLET_LIFE = 3 (秒)
+            --------------------------------------------------
+            射击冷却:                      SHOOT_COOLDOWN = 150 (毫秒，见上方)
+            --------------------------------------------------
+        */
         const bullets = [];
         const bulletGroup = new THREE.Group();
         scene.add(bulletGroup);
-        const BULLET_SPEED = 15;
-        const BULLET_LIFE = 3;
+        const BULLET_SPEED = 15;   // <-- 子弹飞行速度（米/秒）
+        const BULLET_LIFE = 2;     // <-- 子弹存活时间（秒）
 
+        // ==================== 子弹发射角度标注区 ====================
+        /*  如需修改子弹发射角度，在下方 shootBullet 中修改：
+            --------------------------------------------------
+            发射口位置(相对于右手控制器本地坐标):
+                muzzleLocal = (0, 0, -0.2)
+                X=0      左右偏移（米）
+                Y=0      上下偏移（米）
+                Z=-0.2   前后偏移（负=前方，米）
+            --------------------------------------------------
+            方向计算:
+                dir = (0, 0, -1) 应用控制器的旋转(quat)
+                = 沿控制器 Z 轴负方向（正前方）
+            --------------------------------------------------
+            【修改角度示例】在 dir 计算后添加以下代码：
+
+            // 固定俯仰偏移（抬头/低头）
+            const bulletPitch = -15 * Math.PI / 180;  // <-- -15度，负=低头
+            const aimQuat = new THREE.Quaternion();
+            aimQuat.setFromEuler(new THREE.Euler(bulletPitch, 0, 0));
+            dir.applyQuaternion(aimQuat);
+
+            // 或固定偏航偏移（左右摆动）
+            const bulletYaw = 5 * Math.PI / 180;  // <-- +5度，正=左偏
+            const aimQuat = new THREE.Quaternion();
+            aimQuat.setFromEuler(new THREE.Euler(0, bulletYaw, 0));
+            dir.applyQuaternion(aimQuat);
+
+            // 或同时修改俯仰+偏航
+            const aimQuat = new THREE.Quaternion();
+            aimQuat.setFromEuler(new THREE.Euler(bulletPitch, bulletYaw, 0));
+            dir.applyQuaternion(aimQuat);
+            --------------------------------------------------
+        */
         function shootBullet(controller) {
+            // 发射口在控制器本地坐标系中的位置（修改这里调整子弹出膛位置）
             const muzzleLocal = new THREE.Vector3(0, 0, -0.2);
             const origin = muzzleLocal.clone().applyMatrix4(controller.matrixWorld);
             const quat = controller.getWorldQuaternion(new THREE.Quaternion());
             const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(quat);
-            
-            const bulletGeom = new THREE.SphereGeometry(0.03, 8, 8);
-            const bulletMat = new THREE.MeshStandardMaterial({ 
-                color: 0xffaa00, 
+
+            // 子弹外观（修改这里调整子弹大小和颜色）
+            const bulletGeom = new THREE.SphereGeometry(0.02, 8, 8);
+            const bulletMat = new THREE.MeshStandardMaterial({
+                color: 0xffaa00,
                 emissive: 0xff4400,
                 emissiveIntensity: 0.8
             });
             const bullet = new THREE.Mesh(bulletGeom, bulletMat);
             bullet.position.copy(origin);
-            bullet.userData = { 
-                vel: dir.clone().normalize().multiplyScalar(BULLET_SPEED), 
-                life: BULLET_LIFE 
+            bullet.userData = {
+                vel: dir.clone().normalize().multiplyScalar(BULLET_SPEED),
+                life: BULLET_LIFE
             };
             bullet.castShadow = true;
             bulletGroup.add(bullet);
@@ -214,6 +270,237 @@
                     b.material.dispose();
                     bulletGroup.remove(b);
                     bullets.splice(i, 1);
+                }
+            }
+        }
+
+        // ==================== 气球战斗系统 ====================
+        const balloons = [];
+        const balloonGroup = new THREE.Group();
+        scene.add(balloonGroup);
+        const BALLOON_SPEED = 1.0;        // 气球移动速度（米/秒）
+        const BALLOON_SPAWN_RADIUS = 10;  // 生成距离玩家半径（米）
+        const BALLOON_COUNT = 10;         // 气球数量
+        const BALLOON_SCORE = 10;         // 打破气球得分
+        const BALLOON_RADIUS = 0.6;       // 气球半径（米）
+        const BALLOON_COLORS = [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff];
+
+        function createBalloon(x, y, z) {
+            const geom = new THREE.SphereGeometry(BALLOON_RADIUS, 16, 16);
+            const color = BALLOON_COLORS[Math.floor(Math.random() * BALLOON_COLORS.length)];
+            const mat = new THREE.MeshStandardMaterial({
+                color: color,
+                roughness: 0.3,
+                metalness: 0.1
+            });
+            const balloon = new THREE.Mesh(geom, mat);
+            balloon.position.set(x, y, z);
+            balloon.castShadow = true;
+            balloon.userData = { active: true, hp: 1 };
+            balloonGroup.add(balloon);
+            balloons.push(balloon);
+            return balloon;
+        }
+
+        function spawnBalloons() {
+            // 清除旧气球
+            balloons.forEach(b => {
+                b.geometry.dispose();
+                b.material.dispose();
+                balloonGroup.remove(b);
+            });
+            balloons.length = 0;
+
+            // 在玩家10米外生成10个气球
+            const playerPos = dolly.position.clone();
+            for (let i = 0; i < BALLOON_COUNT; i++) {
+                const angle = (Math.PI * 2 / BALLOON_COUNT) * i + Math.random() * 0.5;
+                const r = BALLOON_SPAWN_RADIUS + Math.random() * 5;
+                const x = playerPos.x + Math.cos(angle) * r;
+                const z = playerPos.z + Math.sin(angle) * r;
+                const y = 1.5 + Math.random() * 3; // 高度 1.5~4.5米
+                createBalloon(x, y, z);
+            }
+        }
+
+        function updateBalloons(dt) {
+            const playerPos = dolly.position.clone();
+            playerPos.y += 1.6; // 对准玩家头部高度
+
+            for (let i = balloons.length - 1; i >= 0; i--) {
+                const b = balloons[i];
+                if (!b.userData.active) continue;
+
+                // 向玩家移动
+                const dir = new THREE.Vector3().subVectors(playerPos, b.position).normalize();
+                b.position.x += dir.x * BALLOON_SPEED * dt;
+                b.position.y += dir.y * BALLOON_SPEED * dt;
+                b.position.z += dir.z * BALLOON_SPEED * dt;
+
+                // 简单漂浮动画
+                b.position.y += Math.sin(performance.now() * 0.003 + i) * 0.002;
+            }
+        }
+
+        function checkBulletBalloonCollisions() {
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const bullet = bullets[i];
+                for (let j = balloons.length - 1; j >= 0; j--) {
+                    const balloon = balloons[j];
+                    if (!balloon.userData.active) continue;
+
+                    const dist = bullet.position.distanceTo(balloon.position);
+                    if (dist < BALLOON_RADIUS + 0.05) { // 子弹半径约0.02
+                        // 气球被打破
+                        balloon.userData.active = false;
+                        balloon.visible = false;
+                        playerStats.score += BALLOON_SCORE;
+
+                        // 弹出选择卡
+                        spawnChoiceCards(balloon.position.clone());
+
+                        // 移除子弹
+                        bullet.geometry.dispose();
+                        bullet.material.dispose();
+                        bulletGroup.remove(bullet);
+                        bullets.splice(i, 1);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // ==================== 选择卡系统 ====================
+        let choiceCardsActive = false;
+        const choiceCardGroup = new THREE.Group();
+        scene.add(choiceCardGroup);
+        const CHOICE_CARD_DISTANCE = 2.5; // 选择卡距离玩家（米）
+
+        const choiceOptions = [
+            { label: '生命值+100', effect: () => { playerStats.hp += 100; } },
+            { label: '攻击力+20',  effect: () => { playerStats.atk += 20; } },
+            { label: '多一发子弹', effect: () => { /* 射击额外多一发，在 shootBullet 中实现 */ } }
+        ];
+
+        function createChoiceCard(text, color, xOffset) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+
+            // 背景
+            ctx.fillStyle = `rgba(${color.r},${color.g},${color.b},0.9)`;
+            roundRect(ctx, 0, 0, 512, 256, 32);
+            ctx.fill();
+
+            // 边框
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 8;
+            roundRect(ctx, 4, 4, 504, 248, 28);
+            ctx.stroke();
+
+            // 文字
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 48px "Microsoft YaHei", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(text, 256, 150);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            const geom = new THREE.PlaneGeometry(0.6, 0.3);
+            const mat = new THREE.MeshBasicMaterial({
+                map: texture,
+                transparent: true,
+                side: THREE.DoubleSide
+            });
+            const card = new THREE.Mesh(geom, mat);
+            card.userData = { isChoiceCard: true, label: text };
+            return card;
+        }
+
+        function spawnChoiceCards(breakPos) {
+            if (choiceCardsActive) return; // 已有选择卡时不再弹出
+            choiceCardsActive = true;
+
+            // 清除旧选择卡
+            while (choiceCardGroup.children.length > 0) {
+                const child = choiceCardGroup.children[0];
+                if (child.material.map) child.material.map.dispose();
+                child.material.dispose();
+                child.geometry.dispose();
+                choiceCardGroup.remove(child);
+            }
+
+            const colors = [
+                { r: 255, g: 60, b: 60 },   // 红色 - 生命
+                { r: 255, g: 180, b: 0 },   // 橙色 - 攻击
+                { r: 60, g: 150, b: 255 }   // 蓝色 - 子弹
+            ];
+
+            // 在玩家面前生成三个选择卡
+            const cameraPos = new THREE.Vector3();
+            camera.getWorldPosition(cameraPos);
+            const cameraDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+
+            // 选择卡基础位置：玩家前方
+            const basePos = cameraPos.clone().add(cameraDir.clone().multiplyScalar(CHOICE_CARD_DISTANCE));
+
+            for (let i = 0; i < 3; i++) {
+                const card = createChoiceCard(choiceOptions[i].label, colors[i], 0);
+                // 水平排列：左、中、右
+                const xOffset = (i - 1) * 0.8; // -0.8, 0, 0.8
+                card.position.copy(basePos);
+                card.position.x += xOffset;
+                card.position.y += 0.2;
+                // 面向玩家
+                card.lookAt(cameraPos);
+                choiceCardGroup.add(card);
+            }
+
+            // 2秒后自动清除选择卡（如果没有被选中）
+            setTimeout(() => {
+                if (choiceCardsActive) {
+                    clearChoiceCards();
+                }
+            }, 8000);
+        }
+
+        function clearChoiceCards() {
+            choiceCardsActive = false;
+            while (choiceCardGroup.children.length > 0) {
+                const child = choiceCardGroup.children[0];
+                if (child.material.map) child.material.map.dispose();
+                child.material.dispose();
+                child.geometry.dispose();
+                choiceCardGroup.remove(child);
+            }
+        }
+
+        function checkBulletChoiceCardCollisions() {
+            if (!choiceCardsActive) return;
+
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const bullet = bullets[i];
+                for (let j = choiceCardGroup.children.length - 1; j >= 0; j--) {
+                    const card = choiceCardGroup.children[j];
+                    if (!card.userData.isChoiceCard) continue;
+
+                    const dist = bullet.position.distanceTo(card.position);
+                    if (dist < 0.4) {
+                        // 击中选择卡
+                        const label = card.userData.label;
+                        if (label === '生命值+100') choiceOptions[0].effect();
+                        else if (label === '攻击力+20') choiceOptions[1].effect();
+                        else if (label === '多一发子弹') choiceOptions[2].effect();
+
+                        // 移除子弹
+                        bullet.geometry.dispose();
+                        bullet.material.dispose();
+                        bulletGroup.remove(bullet);
+                        bullets.splice(i, 1);
+
+                        clearChoiceCards();
+                        return;
+                    }
                 }
             }
         }
@@ -328,18 +615,12 @@
         ];
         clouds.forEach(cloud => scene.add(cloud));
 
-        // -------------------- 激光射线 --------------------
-        function updateLasers() {
-            [leftGrip, rightGrip].forEach(grip => {
-                if (!grip) return;
-                grip.traverse(child => {
-                    if (child.userData && child.userData.laser) {
-                        child.scale.set(1, 30, 1);
-                        child.position.set(0, 0, -0.15);
-                    }
-                });
-            });
-        }
+        // -------------------- 玩家状态（右手UI显示） --------------------
+        const playerStats = { hp: 100, score: 50, atk: 30 };
+
+        // -------------------- 左右手柄按键状态（左手UI显示） --------------------
+        const leftBtnState = { trigger: false, grip: false, stickBtn: false, btnX: false, btnY: false };
+        const rightBtnState = { trigger: false, grip: false, stickBtn: false, btnA: false, btnB: false };
 
         // -------------------- 调试 UI 面板（右手腕 3D Canvas） --------------------
         let debugPanel = null;
@@ -389,9 +670,9 @@
             roundRect(c, 2, 2, w - 4, h - 4, 22);
             c.stroke();
 
-            c.fillStyle = '#00ffcc';
+            c.fillStyle = '#ff3333';
             c.font = 'bold 28px monospace';
-            c.fillText('🔧 DEBUG', 18, 42);
+            c.fillText('❤️ 玩家状态', 18, 42);
 
             c.fillStyle = '#ffffff';
             c.font = '22px monospace';
@@ -419,26 +700,92 @@
 
         function updateDebugPanel() {
             if (!rightGrip || !debugPanel) return;
-            const wp = new THREE.Vector3();
-            rightGrip.getWorldPosition(wp);
-            const wr = new THREE.Euler();
-            const wq = new THREE.Quaternion();
-            rightGrip.getWorldQuaternion(wq);
-            wr.setFromQuaternion(wq);
 
-            const toDeg = r => (r * 180 / Math.PI).toFixed(1);
-            const toM = v => v.toFixed(2);
-
-            const modelStatus = ak48Model ? '模型:✅' : '模型:⏳';
-            const attachStatus = ak48Attached ? '挂载:✅' : '挂载:❌';
             const info = [
-                `Pos  X:${toM(wp.x)} Y:${toM(wp.y)} Z:${toM(wp.z)}`,
-                `Rot  X:${toDeg(wr.x)}° Y:${toDeg(wr.y)}°`,
-                `     Z:${toDeg(wr.z)}°`,
-                `AK48  ${modelStatus} ${attachStatus}`
+                `血量  ${playerStats.hp}`,
+                `得分  ${playerStats.score}`,
+                `攻击  ${playerStats.atk}`
             ].join('\n');
 
             drawDebugPanel(info);
+        }
+
+        // -------------------- 左手激光角度 UI 面板 --------------------
+        let leftDebugPanel = null;
+        let leftDebugCanvas = null;
+        let leftDebugCtx = null;
+        let leftDebugTexture = null;
+
+        function createLeftDebugPanel() {
+            leftDebugCanvas = document.createElement('canvas');
+            leftDebugCanvas.width = 512;
+            leftDebugCanvas.height = 256;
+            leftDebugCtx = leftDebugCanvas.getContext('2d');
+
+            leftDebugTexture = new THREE.CanvasTexture(leftDebugCanvas);
+
+            const panelGeo = new THREE.PlaneGeometry(0.18, 0.09);
+            const panelMat = new THREE.MeshBasicMaterial({
+                map: leftDebugTexture,
+                transparent: true,
+                depthTest: false,
+                depthWrite: false,
+                side: THREE.DoubleSide
+            });
+            leftDebugPanel = new THREE.Mesh(panelGeo, panelMat);
+
+            // 手腕背侧，稍微倾斜让玩家翻腕可见
+            leftDebugPanel.position.set(0, 0.06, 0.04);
+            leftDebugPanel.rotation.x = -Math.PI * 0.35;
+
+            drawLeftDebugPanel('初始化中...');
+            return leftDebugPanel;
+        }
+
+        function drawLeftDebugPanel(info) {
+            if (!leftDebugCtx) return;
+            const c = leftDebugCtx;
+            const w = leftDebugCanvas.width;
+            const h = leftDebugCanvas.height;
+
+            c.clearRect(0, 0, w, h);
+            c.fillStyle = 'rgba(0,0,0,0.82)';
+            roundRect(c, 0, 0, w, h, 24);
+            c.fill();
+
+            c.strokeStyle = '#ff6600';
+            c.lineWidth = 4;
+            roundRect(c, 2, 2, w - 4, h - 4, 22);
+            c.stroke();
+
+            c.fillStyle = '#00ccff';
+            c.font = 'bold 28px monospace';
+            c.fillText('🎮 手柄按键', 18, 42);
+
+            c.fillStyle = '#ffffff';
+            c.font = '22px monospace';
+            const lines = info.split('\n');
+            lines.forEach((line, i) => {
+                c.fillText(line, 18, 80 + i * 30);
+            });
+
+            if (leftDebugTexture) leftDebugTexture.needsUpdate = true;
+        }
+
+        function updateLeftDebugPanel() {
+            if (!leftGrip || !leftDebugPanel) return;
+
+            const b = (pressed) => pressed ? '🟢' : '⚪';
+            const info = [
+                `左手 摇杆 ${leftInput.stickX.toFixed(2)},${leftInput.stickY.toFixed(2)}`,
+                `      扳机${b(leftBtnState.trigger)} 握柄${b(leftBtnState.grip)} 摇杆按下${b(leftBtnState.stickBtn)}`,
+                `      X键${b(leftBtnState.btnX)} Y键${b(leftBtnState.btnY)}`,
+                `右手 摇杆 ${rightInput.stickX.toFixed(2)},${rightInput.stickY.toFixed(2)}`,
+                `      扳机${b(rightBtnState.trigger)} 握柄${b(rightBtnState.grip)} 摇杆按下${b(rightBtnState.stickBtn)}`,
+                `      A键${b(rightBtnState.btnA)} B键${b(rightBtnState.btnB)}`
+            ].join('\n');
+
+            drawLeftDebugPanel(info);
         }
 
         // -------------------- 手柄模型 --------------------
@@ -488,20 +835,7 @@
         function createControllerModel(isRight) {
             const group = new THREE.Group();
 
-            if (isRight) {
-                // 右手：超细激光射线，无扳机方块
-                const laserGeo = new THREE.CylinderGeometry(0.0005, 0.0005, 1, 8);
-                laserGeo.rotateX(Math.PI / 2);
-                const laserMat = new THREE.MeshBasicMaterial({
-                    color: 0xff3333,
-                    transparent: true,
-                    opacity: 0.7
-                });
-                const laser = new THREE.Mesh(laserGeo, laserMat);
-                laser.position.set(0, 0, -0.1);
-                group.add(laser);
-                group.userData.laser = laser;
-            }
+            // 激光已移除，手柄模型为空（AK48 枪支在 attachAK48 中单独附加）
 
             return group;
         }
@@ -518,20 +852,39 @@
             if (idx === 1) {
                 rightGrip = grip;
                 attachAK48();
-                // 调试面板挂到右手腕
+                // 玩家状态面板挂到右手腕
                 const panel = createDebugPanel();
                 grip.add(panel);
             } else {
                 leftGrip = grip;
+                // 手柄按键状态面板挂到左手腕
+                const leftPanel = createLeftDebugPanel();
+                grip.add(leftPanel);
             }
             
             if (idx === 0) leftController = controller;
             else rightController = controller;
         }
 
-        // -------------------- 枪支缩放配置（修改这里调整大小） --------------------
-        // 当前值 0.6 = 原始大小的 60%，可根据实际模型大小调整
-        const AK48_SCALE = 0.6;  // ← 调整这个数字来改变枪的大小
+        // ==================== AK48 枪支配置区 ====================
+        /*  枪支参数速查表（修改下方数值即可调整）
+            --------------------------------------------------
+            枪支整体缩放:                  AK48_SCALE = 0.6
+                                           1.0 = 原始大小，0.6 = 60%
+            --------------------------------------------------
+            枪支位置(相对于右手柄):        position.set(0, -0.1, 0.01)
+                                           X=0       左右偏移（正=右，负=左）
+                                           Y=-0.1    上下偏移（正=上，负=下）
+                                           Z=0.01    前后偏移（正=后，负=前）
+            --------------------------------------------------
+            枪支角度(相对于右手柄):        rotation.x = -20
+                                           rotation.y = Math.PI / 2 (即90度)
+                                           rotation.z = 0 (未设置，默认0)
+                                           注意：rotation.x = -20 是弧度值
+                                           如需角度制：-20 * Math.PI / 180 ≈ -0.349 弧度
+            --------------------------------------------------
+        */
+        const AK48_SCALE = 0.6;   // <-- 调整枪支整体大小
 
         // 附加 AK48 到右手柄
         function attachAK48() {
@@ -560,10 +913,11 @@
                 if (child.isMesh) child.castShadow = true;
             });
             
-            // 枪管朝前，放置在手柄前方，Y 轴旋转 90°，位置下沉 0.1
-            gunInstance.position.set(0, -0.1, -0.09);
-            gunInstance.rotation.x = -20;
-            gunInstance.rotation.y = Math.PI / 2;
+            // ==================== 枪支位置和角度微调区 ====================
+            // 修改以下三行来调整枪在手柄上的位置和朝向
+            gunInstance.position.set(0, -0.1, 0.01);  // <-- 位置 XYZ（米）
+            gunInstance.rotation.x = -20;             // <-- X轴旋转（当前为-20弧度，约-1146度）
+            gunInstance.rotation.y = Math.PI / 2;     // <-- Y轴旋转 90度（枪管朝前）
             
             rightGrip.add(gunInstance);
             ak48Attached = true;
@@ -584,7 +938,10 @@
             rightInput.stickX = 0; rightInput.stickY = 0;
             leftInput.stickX = 0; leftInput.stickY = 0;
             rightTrigger = false;
-            
+            // 重置按键状态
+            Object.keys(leftBtnState).forEach(k => leftBtnState[k] = false);
+            Object.keys(rightBtnState).forEach(k => rightBtnState[k] = false);
+
             if (!session.inputSources) return;
             for (const source of session.inputSources) {
                 if (!source.gamepad) continue;
@@ -593,14 +950,27 @@
                 let sx = 0, sy = 0;
                 if (gp.axes.length >= 4) { sx = gp.axes[2]; sy = gp.axes[3]; }
                 else if (gp.axes.length >= 2) { sx = gp.axes[0]; sy = gp.axes[1]; }
-                
-                const trigger = gp.buttons[0]?.value > 0.5;
-                
+
+                const triggerVal = gp.buttons[0]?.value || 0;
+                const trigger = triggerVal > 0.5;
+                const grip = gp.buttons[1]?.pressed || false;
+                const stickBtn = gp.buttons[3]?.pressed || false;
+
                 if (hand === 'right') {
                     rightInput.stickX = sx; rightInput.stickY = sy;
                     rightTrigger = trigger;
+                    rightBtnState.trigger = trigger;
+                    rightBtnState.grip = grip;
+                    rightBtnState.stickBtn = stickBtn;
+                    rightBtnState.btnA = gp.buttons[4]?.pressed || false;
+                    rightBtnState.btnB = gp.buttons[5]?.pressed || false;
                 } else if (hand === 'left') {
                     leftInput.stickX = sx; leftInput.stickY = sy;
+                    leftBtnState.trigger = trigger;
+                    leftBtnState.grip = grip;
+                    leftBtnState.stickBtn = stickBtn;
+                    leftBtnState.btnX = gp.buttons[4]?.pressed || false;
+                    leftBtnState.btnY = gp.buttons[5]?.pressed || false;
                 }
             }
         }
@@ -636,13 +1006,6 @@
             const scrollSpeed = 2.0 * intensity;
             cloudScroll.x = (forward.x * sy + right.x * sx) * scrollSpeed;
             cloudScroll.y = (forward.z * sy + right.z * sx) * scrollSpeed;
-
-            // 玩家只在极小的范围内轻微晃动，模拟热气球颠簸感
-            const swaySpeed = 0.5;
-            dolly.position.x += (Math.random() - 0.5) * swaySpeed * dt * intensity;
-            dolly.position.z += (Math.random() - 0.5) * swaySpeed * dt * intensity;
-            dolly.position.x = Math.min(0.3, Math.max(-0.3, dolly.position.x));
-            dolly.position.z = Math.min(0.3, Math.max(-0.3, dolly.position.z));
         }
 
         function handleExit() {
@@ -686,9 +1049,9 @@
                 handleMovement(dt);
                 handleShooting();
                 updateBullets(dt);
-                updateLasers();
                 handleExit();
                 updateDebugPanel();
+                updateLeftDebugPanel();
                 updateCloudLayers(dt);
                 vrEntryEl.style.display = 'none';
                 vrHintsEl.style.display = 'none';
