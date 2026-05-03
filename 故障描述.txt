@@ -1,0 +1,2 @@
+laserGeo.rotateX(Math.PI / 2);修改后，左右手柄都出现射线变成一个巴掌大的红色长方形
+laserGeo.rotateX(Math.PI / 4);修改后，左右手柄都出现射线变正常粗细，但和上面角度相差90度
