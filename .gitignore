@@ -22,7 +22,11 @@ __pycache__/
 
 # 便携工具
 PortableGit/
+PortableGit.exe
 *.pem
+
+# Git  bundle 文件
+*.bundle
 
 # 本地证书
 localhost+*.pem
