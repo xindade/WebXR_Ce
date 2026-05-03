@@ -31,4 +31,5 @@ localhost+*.pem
 pico-vr-app/node_modules/
 pico-vr-app/android/.gradle/
 pico-vr-app/android/app/build/
+pico-vr-app/android/app/release/
 pico-vr-app/android/local.properties
