@@ -26,3 +26,9 @@ PortableGit/
 
 # 本地证书
 localhost+*.pem
+
+# PICO VR App
+pico-vr-app/node_modules/
+pico-vr-app/android/.gradle/
+pico-vr-app/android/app/build/
+pico-vr-app/android/local.properties
