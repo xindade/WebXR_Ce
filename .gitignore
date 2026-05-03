@@ -19,3 +19,10 @@ __pycache__/
 
 # Git
 .git/
+
+# 便携工具
+PortableGit/
+*.pem
+
+# 本地证书
+localhost+*.pem

@@ -1,0 +1,1520 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>VR 热气球托盘场景 - Ak48压缩版</title>
+    <style>
+        :root { --bg: #1a1a2e; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: var(--bg); overflow: hidden;
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            height: 100vh; width: 100vw;
+            user-select: none; -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        canvas { display: block; }
+        
+        #vr-entry { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); z-index: 20; }
+        #enter-vr-btn {
+            display: block; padding: 16px 44px; font-size: 20px; font-weight: 700;
+            letter-spacing: 2px; color: #fff;
+            background: linear-gradient(135deg, #e94560, #c23152);
+            border: none; border-radius: 50px; cursor: pointer;
+            transition: all 0.3s ease; box-shadow: 0 8px 30px rgba(233,69,96,0.5);
+            text-transform: uppercase; outline: none;
+        }
+        #enter-vr-btn:hover { background: linear-gradient(135deg, #ff5a7a, #e94560); transform: translateY(-3px); }
+        #enter-vr-btn:active { transform: scale(0.96); }
+        #enter-vr-btn:disabled { background: #555; box-shadow: none; cursor: not-allowed; opacity: 0.6; }
+        
+        #vr-hints {
+            position: fixed; bottom: 130px; left: 50%; transform: translateX(-50%);
+            z-index: 15; pointer-events: none; display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;
+        }
+        .hint-badge {
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);
+            border-radius: 20px; padding: 8px 18px; color: #fff; font-size: 13px;
+            letter-spacing: 1px; white-space: nowrap;
+        }
+        .hint-badge .key { font-weight: 700; color: #ffd700; }
+        
+        #status-msg {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+            z-index: 30; color: #fff; font-size: 18px; text-align: center;
+            background: rgba(0,0,0,0.75); padding: 20px 30px;
+            border-radius: 16px; display: none;
+        }
+        #status-msg.error { background: rgba(180,30,30,0.85); display: block; }
+        
+        #loading {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+            color: #fff; font-size: 20px; z-index: 100;
+            display: flex; flex-direction: column; align-items: center; gap: 12px;
+        }
+        #loading-spinner {
+            width: 48px; height: 48px; border: 4px solid rgba(255,255,255,0.2);
+            border-top-color: #fff; border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <div id="loading-spinner"></div>
+        <div>加载中...</div>
+    </div>
+    <div id="vr-entry"><button id="enter-vr-btn">🎈 进入VR场景</button></div>
+    <div id="vr-hints">
+        <span class="hint-badge">🔫 <span class="key">扳机</span> 射击</span>
+        <span class="hint-badge">🕹️ <span class="key">摇杆</span> 移动</span>
+        <span class="hint-badge">🅰️ <span class="key">A键</span> 退出</span>
+    </div>
+    <div id="status-msg"></div>
+
+    <!-- 本地文件，HTTP 服务器即可，PICO 浏览器无需访问任何外部网络 -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "./three.module.js",
+                "three/addons/": "./jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
+        // DOM 元素
+        const enterVRBtn = document.getElementById('enter-vr-btn');
+        const statusMsgEl = document.getElementById('status-msg');
+        const vrHintsEl = document.getElementById('vr-hints');
+        const vrEntryEl = document.getElementById('vr-entry');
+        const loadingEl = document.getElementById('loading');
+
+        // -------------------- 加载状态管理 --------------------
+        const loadingResources = { texture: false, model: false };
+        let loadingHidden = false;
+
+        function checkAllLoaded(msg) {
+            if (loadingHidden) return;
+            if (msg) {
+                loadingEl.innerHTML = '<div style="color:#ffaa00;">' + msg + '</div>';
+                setTimeout(() => { loadingEl.style.display = 'none'; loadingHidden = true; }, 1500);
+                return;
+            }
+            if (loadingResources.texture && loadingResources.model) {
+                loadingHidden = true;
+                loadingEl.style.display = 'none';
+            }
+        }
+
+        function onResourceError(msg) {
+            loadingEl.innerHTML = '<div style="color:#ffaa00;">' + msg + '</div>';
+            setTimeout(() => { loadingEl.style.display = 'none'; loadingHidden = true; }, 2000);
+        }
+
+        // 最长等待 15 秒后强制关闭
+        setTimeout(() => {
+            if (!loadingHidden) onResourceError('⚠️ 加载超时，检查 HTTP 服务器是否运行中...');
+        }, 15000);
+
+        // 摇杆和输入状态
+        const rightInput = { stickX: 0, stickY: 0 };
+        const leftInput = { stickX: 0, stickY: 0 };
+
+        // 云海滚动速度（由摇杆控制）
+        const cloudScroll = { x: 0, y: 0 };
+
+        const MOVE_SPEED = 3.5;
+        const DEADZONE = 0.2;
+        const SHOOT_COOLDOWN = 150; // 射击冷却时间(ms)
+
+        // ==================== 音效系统（Web Audio API） ====================
+        let audioCtx = null;
+        let bgMusicNode = null;
+        let bgMusicGain = null;
+
+        function initAudio() {
+            if (audioCtx) return;
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            startBackgroundMusic();
+        }
+
+        // 射击音效 - 更真实的枪声
+        function playShootSound() {
+            if (!audioCtx) return;
+            // 使用噪声模拟枪声
+            const bufferSize = audioCtx.sampleRate * 0.1;
+            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.1));
+            }
+            const noise = audioCtx.createBufferSource();
+            noise.buffer = buffer;
+            
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+            
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(3000, audioCtx.currentTime);
+            
+            noise.connect(filter);
+            filter.connect(gain);
+            gain.connect(audioCtx.destination);
+            noise.start();
+            noise.stop(audioCtx.currentTime + 0.1);
+        }
+
+        // 气球爆裂音效 - 更真实的爆裂声
+        function playBalloonPopSound() {
+            if (!audioCtx) return;
+            // 低频爆裂
+            const osc1 = audioCtx.createOscillator();
+            const gain1 = audioCtx.createGain();
+            osc1.type = 'sine';
+            osc1.frequency.setValueAtTime(150, audioCtx.currentTime);
+            osc1.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.2);
+            gain1.gain.setValueAtTime(0.4, audioCtx.currentTime);
+            gain1.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
+            osc1.connect(gain1);
+            gain1.connect(audioCtx.destination);
+            osc1.start();
+            osc1.stop(audioCtx.currentTime + 0.2);
+            
+            // 高频撕裂声
+            const osc2 = audioCtx.createOscillator();
+            const gain2 = audioCtx.createGain();
+            osc2.type = 'sawtooth';
+            osc2.frequency.setValueAtTime(2000, audioCtx.currentTime);
+            osc2.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.15);
+            gain2.gain.setValueAtTime(0.15, audioCtx.currentTime);
+            gain2.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+            osc2.connect(gain2);
+            gain2.connect(audioCtx.destination);
+            osc2.start();
+            osc2.stop(audioCtx.currentTime + 0.15);
+        }
+
+        // 背景音乐 - 简单的循环旋律
+        function startBackgroundMusic() {
+            if (!audioCtx || bgMusicNode) return;
+            
+            bgMusicGain = audioCtx.createGain();
+            bgMusicGain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+            bgMusicGain.connect(audioCtx.destination);
+            
+            // 简单的和弦进行
+            const chords = [
+                [261.63, 329.63, 392.00], // C major
+                [293.66, 369.99, 440.00], // D minor
+                [349.23, 440.00, 523.25], // F major
+                [392.00, 493.88, 587.33]  // G major
+            ];
+            
+            let chordIndex = 0;
+            
+            function playChord() {
+                if (!bgMusicGain) return;
+                
+                const chord = chords[chordIndex % chords.length];
+                chord.forEach(freq => {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                    gain.gain.setValueAtTime(0.03, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 2);
+                    osc.connect(gain);
+                    gain.connect(bgMusicGain);
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + 2);
+                });
+                
+                chordIndex++;
+                if (bgMusicNode) {
+                    bgMusicNode = setTimeout(playChord, 2000);
+                }
+            }
+            
+            bgMusicNode = setTimeout(playChord, 500);
+        }
+
+        function stopBackgroundMusic() {
+            if (bgMusicNode) {
+                clearTimeout(bgMusicNode);
+                bgMusicNode = null;
+            }
+            if (bgMusicGain) {
+                bgMusicGain.gain.setValueAtTime(0, audioCtx.currentTime);
+                bgMusicGain = null;
+            }
+        }
+
+        // Three.js 核心
+        const renderer = new THREE.WebGLRenderer({ antialias: false }); // VR头显自带反锯齿，关闭省GPU
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.0)); // 限制1.0，移动端降采样
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+
+        // VR 模式下关闭阴影（移动 GPU 瓶颈优化）
+        function setShadow(enabled) {
+            renderer.shadowMap.enabled = enabled;
+            sunLight.castShadow = enabled;
+            if (!enabled) {
+                // VR 时直接关闭所有阴影投射，避免额外的深度图 pass
+                scene.traverse(obj => {
+                    if (obj.isMesh) obj.castShadow = false;
+                });
+            } else {
+                // 恢复
+                sunLight.castShadow = true;
+                scene.traverse(obj => {
+                    if (obj.isMesh && (obj === ak48Model || obj.parent === ak48Model)) {
+                        // 不处理
+                    }
+                });
+            }
+        }
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.toneMapping = THREE.NoToneMapping; // 关闭色调映射，ACES最影响移动GPU
+        renderer.xr.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        scene.fog = new THREE.Fog(0x87CEEB, 30, 100);
+
+        // 渲染器清除色与背景一致，避免快速转头时边缘露出黑色
+        renderer.setClearColor(new THREE.Color(0x87CEEB));
+
+        const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 200);
+        camera.position.set(0, 1.6, 0);
+        const dolly = new THREE.Group();
+        dolly.add(camera);
+        scene.add(dolly);
+
+        // 天空穹顶（半球），跟随相机移动，转头再快也不会露出黑边
+        function createSkyDome() {
+            // SphereGeometry: phiLength=PI 整球，thetaLength=PI/2 则只显示上半球（天空）
+            const skyGeo = new THREE.SphereGeometry(60, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+            const skyMat = new THREE.MeshBasicMaterial({
+                color: 0x87CEEB,
+                side: THREE.BackSide,
+                depthWrite: false
+            });
+            const sky = new THREE.Mesh(skyGeo, skyMat);
+            // 穹顶底部对齐玩家眼高，完整包裹头顶和四周
+            sky.position.y = 1.6;
+            return sky;
+        }
+        dolly.add(createSkyDome()); // 随玩家移动，完全填满 VR 全视角
+
+        // 光照
+        scene.add(new THREE.AmbientLight(0xffeedd, 1.2));
+        const sunLight = new THREE.DirectionalLight(0xffffff, 2.5);
+        sunLight.position.set(20, 40, 10);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.width = 2048;
+        sunLight.shadow.mapSize.height = 2048;
+        sunLight.shadow.camera.near = 0.5;
+        sunLight.shadow.camera.far = 100;
+        sunLight.shadow.camera.left = -30;
+        sunLight.shadow.camera.right = 30;
+        sunLight.shadow.camera.top = 30;
+        sunLight.shadow.camera.bottom = -30;
+        scene.add(sunLight);
+        scene.add(new THREE.HemisphereLight(0x87CEEB, 0x90EE90, 0.8));
+
+        // ==================== 子弹系统配置 ====================
+        /*  子弹参数速查表（修改下方数值即可调整）
+            --------------------------------------------------
+            发射口位置(相对于右手控制器):  muzzleLocal (0, 0, -0.2)
+                                           X=0      左右偏移
+                                           Y=0      上下偏移
+                                           Z=-0.2   前后偏移（负=前方）
+            --------------------------------------------------
+            子弹大小:                      SphereGeometry(0.03, 8, 8)
+                                           0.03 = 半径（米）
+            --------------------------------------------------
+            子弹颜色:                      color: 0xffaa00 (橙黄)
+                                           emissive: 0xff4400 (发光橙红)
+                                           emissiveIntensity: 0.8 (发光强度)
+            --------------------------------------------------
+            子弹速度:                      BULLET_SPEED = 15 (米/秒)
+            --------------------------------------------------
+            子弹寿命:                      BULLET_LIFE = 3 (秒)
+            --------------------------------------------------
+            射击冷却:                      SHOOT_COOLDOWN = 150 (毫秒，见上方)
+            --------------------------------------------------
+        */
+        const bullets = [];
+        const bulletGroup = new THREE.Group();
+        scene.add(bulletGroup);
+        const BULLET_SPEED = 15;   // <-- 子弹飞行速度（米/秒）
+        const BULLET_LIFE = 2;     // <-- 子弹存活时间（秒）
+
+        // ==================== 子弹对象池（消除 GC） ====================
+        const BULLET_POOL_SIZE = 20;
+        const sharedBulletGeom = new THREE.SphereGeometry(0.02, 8, 8);
+        const sharedBulletMat = new THREE.MeshStandardMaterial({
+            color: 0xffaa00,
+            emissive: 0xff4400,
+            emissiveIntensity: 0.8
+        });
+        const bulletPool = [];
+
+        function initBulletPool() {
+            for (let i = 0; i < BULLET_POOL_SIZE; i++) {
+                const mesh = new THREE.Mesh(sharedBulletGeom, sharedBulletMat);
+                mesh.userData = { active: false, vel: new THREE.Vector3(), life: 0 };
+                mesh.visible = false;
+                bulletGroup.add(mesh);
+                bulletPool.push(mesh);
+            }
+        }
+        initBulletPool();
+
+        function acquireBullet() {
+            for (let i = 0; i < bulletPool.length; i++) {
+                if (!bulletPool[i].userData.active) return bulletPool[i];
+            }
+            return null; // 池已满
+        }
+
+        // ==================== 子弹发射角度标注区 ====================
+        /*  如需修改子弹发射角度，在下方 shootBullet 中修改：
+            --------------------------------------------------
+            发射口位置(相对于右手控制器本地坐标):
+                muzzleLocal = (0, 0, -0.2)
+                X=0      左右偏移（米）
+                Y=0      上下偏移（米）
+                Z=-0.2   前后偏移（负=前方，米）
+            --------------------------------------------------
+            方向计算:
+                dir = (0, 0, -1) 应用控制器的旋转(quat)
+                = 沿控制器 Z 轴负方向（正前方）
+            --------------------------------------------------
+            【修改角度示例】在 dir 计算后添加以下代码：
+
+            // 固定俯仰偏移（抬头/低头）
+            const bulletPitch = -30 * Math.PI / 180;  // <-- -15度，负=低头
+            const aimQuat = new THREE.Quaternion();
+            aimQuat.setFromEuler(new THREE.Euler(bulletPitch, 0, 0));
+            dir.applyQuaternion(aimQuat);
+
+            // 或固定偏航偏移（左右摆动）
+            const bulletYaw = 5 * Math.PI / 180;  // <-- +5度，正=左偏
+            const aimQuat = new THREE.Quaternion();
+            aimQuat.setFromEuler(new THREE.Euler(0, bulletYaw, 0));
+            dir.applyQuaternion(aimQuat);
+
+            // 或同时修改俯仰+偏航
+            const aimQuat = new THREE.Quaternion();
+            aimQuat.setFromEuler(new THREE.Euler(bulletPitch, bulletYaw, 0));
+            dir.applyQuaternion(aimQuat);
+            --------------------------------------------------
+        */
+        function shootBullet(controller) {
+            // 主子弹
+            fireOneBullet(controller);
+            
+            // 如果启用额外子弹，再发射一颗（偏移一点）
+            if (extraBulletEnabled) {
+                setTimeout(() => fireOneBullet(controller), 50);
+            }
+        }
+        
+        function fireOneBullet(controller) {
+            const bullet = acquireBullet();
+            if (!bullet) return; // 池已满，跳过本次射击
+
+            initAudio(); // 用户首次射击时初始化 AudioContext
+            playShootSound();
+
+            // 发射口在控制器本地坐标系中的位置（修改这里调整子弹出膛位置）
+            const muzzleLocal = new THREE.Vector3(0, 0, -0.2);
+            const origin = muzzleLocal.clone().applyMatrix4(controller.matrixWorld);
+            const quat = controller.getWorldQuaternion(new THREE.Quaternion());
+
+            // ── 俯仰偏移在控制器本地坐标系中计算，避免水平转动时角度串扰 ──
+            // 先在本地空间构造俯仰四元数，再与控制器世界朝向合成
+            const bulletPitch = -30 * Math.PI / 180; // 负=向下低头（修改此处）
+            const localPitchQuat = new THREE.Quaternion().setFromEuler(
+                new THREE.Euler(bulletPitch, 0, 0)
+            );
+            // 合成：先控制器旋转，再本地俯仰 → 方向始终相对枪管轴
+            const finalQuat = quat.clone().multiply(localPitchQuat);
+            const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(finalQuat);
+
+            bullet.position.copy(origin);
+            bullet.userData.active = true;
+            bullet.userData.vel.copy(dir.normalize().multiplyScalar(BULLET_SPEED));
+            bullet.userData.life = BULLET_LIFE;
+            bullet.visible = true;
+            bullets.push(bullet);
+        }
+
+        function updateBullets(dt) {
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const b = bullets[i];
+                b.position.x += b.userData.vel.x * dt;
+                b.position.y += b.userData.vel.y * dt;
+                b.position.z += b.userData.vel.z * dt;
+                b.userData.life -= dt;
+
+                // 超出范围或生命结束则回池
+                if (b.userData.life <= 0 || b.position.y < 0 || b.position.y > 30) {
+                    b.userData.active = false;
+                    b.visible = false;
+                    bullets.splice(i, 1);
+                }
+            }
+        }
+
+        // ==================== 气球战斗系统配置 ====================
+        /*  气球参数速查表（修改下方数值即可调整）
+            --------------------------------------------------
+            气球数量:                      BALLOON_COUNT = 10
+            --------------------------------------------------
+            气球生命值:                    BALLOON_HP = 100
+            --------------------------------------------------
+            气球移动速度:                  BALLOON_SPEED = 1.0 (米/秒)
+            --------------------------------------------------
+            生成距离:                      BALLOON_SPAWN_RADIUS = 10 (米)
+                                           玩家初始位置方圆10米外
+            --------------------------------------------------
+            气球半径:                      BALLOON_RADIUS = 0.5 (米)
+            --------------------------------------------------
+            打破气球得分:                  BALLOON_SCORE = 10
+            --------------------------------------------------
+            子弹伤害:                      BULLET_DAMAGE = 30 (每发)
+            --------------------------------------------------
+        */
+        const balloons = [];
+        const balloonGroup = new THREE.Group();
+        scene.add(balloonGroup);
+        const BALLOON_SPEED = 0.5;         // <-- 气球移动速度（米/秒）
+        const BALLOON_SPAWN_RADIUS = 15;  // <-- 生成距离玩家半径（米）
+        const BALLOON_COUNT = 10;          // <-- 气球数量
+        const BALLOON_HP = 100;            // <-- 气球生命值
+        const BALLOON_SCORE = 10;          // <-- 打破气球得分
+        const BALLOON_RADIUS = 0.5;        // <-- 气球半径（米）
+        const BULLET_DAMAGE = 30;          // <-- 子弹伤害
+        const BALLOON_COLORS = [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff, 0xff88ff, 0x88ffff];
+
+        function createBalloon(x, y, z) {
+            const geom = new THREE.SphereGeometry(BALLOON_RADIUS, 8, 8); // 8x8降低三角面，视觉差距小
+            const color = BALLOON_COLORS[Math.floor(Math.random() * BALLOON_COLORS.length)];
+            const mat = new THREE.MeshStandardMaterial({
+                color: color,
+                roughness: 0.3,
+                metalness: 0.1,
+                emissive: color,
+                emissiveIntensity: 0.1
+            });
+            const balloon = new THREE.Mesh(geom, mat);
+            balloon.position.set(x, y, z);
+            balloon.castShadow = true;
+            balloon.userData = { active: true, hp: BALLOON_HP, maxHp: BALLOON_HP };
+            balloonGroup.add(balloon);
+            balloons.push(balloon);
+            return balloon;
+        }
+
+        function spawnBalloons() {
+            // 清除旧气球
+            balloons.forEach(b => {
+                b.geometry.dispose();
+                b.material.dispose();
+                balloonGroup.remove(b);
+            });
+            balloons.length = 0;
+
+            // 在玩家初始位置方圆10米外生成10个气球
+            const playerPos = dolly.position.clone();
+            for (let i = 0; i < BALLOON_COUNT; i++) {
+                const angle = (Math.PI * 2 / BALLOON_COUNT) * i + Math.random() * 0.5;
+                const r = BALLOON_SPAWN_RADIUS + Math.random() * 3;
+                const x = playerPos.x + Math.cos(angle) * r;
+                const z = playerPos.z + Math.sin(angle) * r;
+                const y = 1.5 + Math.random() * 3; // 高度 1.5~4.5米
+                createBalloon(x, y, z);
+            }
+        }
+
+        function updateBalloons(dt) {
+            const playerPos = dolly.position.clone();
+            playerPos.y += 1.6; // 对准玩家头部高度
+
+            for (let i = balloons.length - 1; i >= 0; i--) {
+                const b = balloons[i];
+                if (!b.userData.active) continue;
+
+                // 向玩家移动
+                const dir = new THREE.Vector3().subVectors(playerPos, b.position).normalize();
+                b.position.x += dir.x * BALLOON_SPEED * dt;
+                b.position.y += dir.y * BALLOON_SPEED * dt;
+                b.position.z += dir.z * BALLOON_SPEED * dt;
+
+                // 漂浮动画
+                b.position.y += Math.sin(performance.now() * 0.003 + i) * 0.002;
+            }
+        }
+
+        function checkBulletBalloonCollisions() {
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const bullet = bullets[i];
+                for (let j = balloons.length - 1; j >= 0; j--) {
+                    const balloon = balloons[j];
+                    if (!balloon.userData.active) continue;
+
+                    const dist = bullet.position.distanceTo(balloon.position);
+                    if (dist < BALLOON_RADIUS + 0.05) {
+                        // 气球受伤（使用玩家当前攻击力）
+                        balloon.userData.hp -= playerStats.atk;
+
+                        // 击中效果：闪烁
+                        balloon.material.emissiveIntensity = 0.5;
+                        setTimeout(() => {
+                            if (balloon.userData) balloon.material.emissiveIntensity = 0.1;
+                        }, 100);
+
+                        // 检查气球是否被打破
+                        if (balloon.userData.hp <= 0) {
+                            balloon.userData.active = false;
+                            balloon.visible = false;
+                            playerStats.score += BALLOON_SCORE;
+                            playBalloonPopSound();
+                        }
+                        // 子弹碰一次就销毁（不再穿透），避免同一发子弹在气球内部多帧重复扣血
+                        bullet.userData.active = false;
+                        bullet.visible = false;
+                        bullets.splice(i, 1);
+
+                        // 检查是否所有气球都被打破
+                        checkAllBalloonsDestroyed();
+                        break; // 子弹已销毁，直接跳出内层循环
+                    }
+                }
+            }
+        }
+
+        function checkAllBalloonsDestroyed() {
+            const activeBalloons = balloons.filter(b => b.userData.active);
+            if (activeBalloons.length === 0 && !choiceCardsActive) {
+                // 所有气球都被打破，弹出选择卡
+                spawnChoiceCards();
+            }
+        }
+
+        // ==================== 选择卡系统配置 ====================
+        /*  选择卡参数速查表（修改下方数值即可调整）
+            --------------------------------------------------
+            选择卡距离玩家:                CHOICE_CARD_DISTANCE = 2.5 (米)
+            --------------------------------------------------
+            选择卡尺寸:                    宽 0.5米, 高 0.3米
+            --------------------------------------------------
+            选择卡存在时间:                10秒（超时自动消失）
+            --------------------------------------------------
+            选择卡效果:
+                [0] 生命值+100
+                [1] 攻击力+20
+                [2] 射击额外发射一颗子弹
+            --------------------------------------------------
+        */
+        let choiceCardsActive = false;
+        let extraBulletEnabled = false; // 是否启用额外子弹
+        const choiceCardGroup = new THREE.Group();
+        scene.add(choiceCardGroup);
+        const CHOICE_CARD_DISTANCE = 0.5; // <-- 选择卡距离玩家（米）- 从0.8改为0.5更近
+
+        const choiceOptions = [
+            { 
+                label: '生命值+100', 
+                color: { r: 255, g: 60, b: 60 },
+                effect: () => { 
+                    playerStats.hp += 100; 
+                    console.log('✅ 选择了：生命值+100'); 
+                }
+            },
+            { 
+                label: '攻击力+20',  
+                color: { r: 255, g: 180, b: 0 },
+                effect: () => { 
+                    playerStats.atk += 20; 
+                    console.log('✅ 选择了：攻击力+20'); 
+                }
+            },
+            { 
+                label: '多一发子弹', 
+                color: { r: 60, g: 150, b: 255 },
+                effect: () => { 
+                    extraBulletEnabled = true; 
+                    console.log('✅ 选择了：多一发子弹'); 
+                }
+            }
+        ];
+
+        function createChoiceCard(option, index) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+
+            // 背景
+            ctx.fillStyle = `rgba(${option.color.r},${option.color.g},${option.color.b},0.9)`;
+            roundRect(ctx, 0, 0, 512, 256, 32);
+            ctx.fill();
+
+            // 边框
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 8;
+            roundRect(ctx, 4, 4, 504, 248, 28);
+            ctx.stroke();
+
+            // 文字
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 48px "Microsoft YaHei", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(option.label, 256, 140);
+            
+            // 提示文字
+            ctx.font = '28px "Microsoft YaHei", sans-serif';
+            ctx.fillText('← 用左手柄碰触 →', 256, 190);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            const geom = new THREE.PlaneGeometry(0.5, 0.3);
+            const mat = new THREE.MeshBasicMaterial({
+                map: texture,
+                transparent: true,
+                side: THREE.DoubleSide
+            });
+            const card = new THREE.Mesh(geom, mat);
+            card.userData = { 
+                isChoiceCard: true, 
+                label: option.label, 
+                index: index,
+                optionIndex: index,
+                originalColor: { r: option.color.r, g: option.color.g, b: option.color.b },
+                canvas: canvas,
+                ctx: ctx,
+                texture: texture
+            };
+            return card;
+        }
+
+        function spawnChoiceCards() {
+            if (choiceCardsActive) return;
+            choiceCardsActive = true;
+            selectedCardIndex = -1;
+            cardHighlightTime = 0;
+
+            // 清除旧选择卡
+            while (choiceCardGroup.children.length > 0) {
+                const child = choiceCardGroup.children[0];
+                if (child.material.map) child.material.map.dispose();
+                child.material.dispose();
+                child.geometry.dispose();
+                choiceCardGroup.remove(child);
+            }
+
+            // 在玩家面前生成三个选择卡
+            const cameraPos = new THREE.Vector3();
+            camera.getWorldPosition(cameraPos);
+            const cameraDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+
+            // 选择卡基础位置：玩家前方
+            const basePos = cameraPos.clone().add(cameraDir.clone().multiplyScalar(CHOICE_CARD_DISTANCE));
+            basePos.y = 1.2; // 固定高度
+
+            // 计算相机右方向（用于横向排列卡片）
+            const cameraRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+            cameraRight.y = 0;
+            cameraRight.normalize();
+
+            for (let i = 0; i < 3; i++) {
+                const card = createChoiceCard(choiceOptions[i], i);
+                // 沿相机右方向横向分布三张卡，间距 0.6 米
+                const offset = (i - 1) * 0.6;
+                card.position.copy(basePos).addScaledVector(cameraRight, offset);
+                // 面向玩家
+                card.lookAt(cameraPos);
+                choiceCardGroup.add(card);
+            }
+
+            console.log('🎴 选择卡已生成，等待左手柄碰触...');
+        }
+
+        function clearChoiceCards() {
+            choiceCardsActive = false;
+            while (choiceCardGroup.children.length > 0) {
+                const child = choiceCardGroup.children[0];
+                if (child.material.map) child.material.map.dispose();
+                child.material.dispose();
+                child.geometry.dispose();
+                choiceCardGroup.remove(child);
+            }
+            
+            // 选择卡清除后，重新生成气球
+            setTimeout(() => {
+                spawnBalloons();
+                console.log('🎈 新一轮气球已生成');
+            }, 1000);
+        }
+
+        // 用左手柄碰触选择卡
+        function checkLeftHandChoiceCardCollision() {
+            if (!choiceCardsActive || !leftController) return;
+
+            const leftPos = new THREE.Vector3();
+            leftController.getWorldPosition(leftPos);
+
+            for (let j = choiceCardGroup.children.length - 1; j >= 0; j--) {
+                const card = choiceCardGroup.children[j];
+                if (!card.userData.isChoiceCard) continue;
+
+                const dist = leftPos.distanceTo(card.position);
+                if (dist < 0.4) {
+                    // 左手柄碰触选择卡
+                    const label = card.userData.label;
+                    const index = card.userData.index;
+                    choiceOptions[index].effect();
+                    
+                    // 清除选择卡并重新开始
+                    clearChoiceCards();
+                    return;
+                }
+            }
+        }
+
+        // ==================== 粒子系统 ====================
+        const particles = [];
+        const particleGroup = new THREE.Group();
+        scene.add(particleGroup);
+        const PARTICLE_COUNT = 50;
+        const PARTICLE_LIFE = 1.0; // 粒子生命周期（秒）
+        
+        // 粒子对象池
+        const particlePool = [];
+        function initParticlePool() {
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                const geom = new THREE.SphereGeometry(0.01, 4, 4);
+                const mat = new THREE.MeshBasicMaterial({
+                    color: 0xffffff,
+                    transparent: true,
+                    opacity: 1.0
+                });
+                const mesh = new THREE.Mesh(geom, mat);
+                mesh.userData = { active: false, vel: new THREE.Vector3(), life: 0 };
+                mesh.visible = false;
+                particleGroup.add(mesh);
+                particlePool.push(mesh);
+            }
+        }
+        initParticlePool();
+        
+        function spawnParticles(position, color, count = 30) {
+            for (let i = 0; i < count; i++) {
+                const p = particlePool.find(p => !p.userData.active);
+                if (!p) break;
+                
+                p.position.copy(position);
+                p.userData.active = true;
+                p.userData.life = PARTICLE_LIFE;
+                p.userData.vel.set(
+                    (Math.random() - 0.5) * 2,
+                    (Math.random() - 0.5) * 2,
+                    (Math.random() - 0.5) * 2
+                );
+                p.material.color.setHex(color);
+                p.material.opacity = 1.0;
+                p.visible = true;
+            }
+        }
+        
+        function updateParticles(dt) {
+            for (let i = 0; i < particlePool.length; i++) {
+                const p = particlePool[i];
+                if (!p.userData.active) continue;
+                
+                p.position.addScaledVector(p.userData.vel, dt);
+                p.userData.vel.multiplyScalar(0.98); // 阻尼
+                p.userData.life -= dt;
+                p.material.opacity = Math.max(0, p.userData.life / PARTICLE_LIFE);
+                
+                if (p.userData.life <= 0) {
+                    p.userData.active = false;
+                    p.visible = false;
+                }
+            }
+        }
+        function createCartoonCloudTexture(size = 512, cloudCount = 25) {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, size, size);
+
+            function drawCloud(cx, cy, baseR) {
+                const parts = [
+                    [0, 0, baseR],
+                    [-baseR * 0.7, -baseR * 0.3, baseR * 0.8],
+                    [baseR * 0.7, -baseR * 0.3, baseR * 0.9],
+                    [-baseR * 0.4, -baseR * 0.7, baseR * 0.7],
+                    [baseR * 0.4, -baseR * 0.7, baseR * 0.75],
+                    [0, -baseR * 0.9, baseR * 0.7],
+                ];
+                ctx.fillStyle = '#000000';
+                parts.forEach(([dx, dy, r]) => {
+                    ctx.beginPath();
+                    ctx.arc(cx + dx, cy + dy, r + 2, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+                ctx.fillStyle = '#ffffff';
+                parts.forEach(([dx, dy, r]) => {
+                    ctx.beginPath();
+                    ctx.arc(cx + dx, cy + dy, r, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+            }
+
+            const margin = size * 0.1;
+            for (let i = 0; i < cloudCount; i++) {
+                const cx = margin + Math.random() * (size - margin * 2);
+                const cy = margin + Math.random() * (size - margin * 2);
+                const r = size * 0.04 + Math.random() * size * 0.06;
+                drawCloud(cx, cy, r);
+            }
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        function createCloudLayer(y, repeatCount, speed) {
+            const texture = createCartoonCloudTexture();
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(repeatCount, repeatCount);
+
+            const geometry = new THREE.CircleGeometry(80, 64);
+            const material = new THREE.MeshBasicMaterial({
+                map: texture,
+                transparent: true,
+                depthWrite: false,
+                side: THREE.DoubleSide,
+            });
+
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.rotation.x = -Math.PI / 2;
+            mesh.position.y = y;
+            mesh.userData = { speed, texture };
+            return mesh;
+        }
+
+        const cloudLayer1 = createCloudLayer(0, 25, 0.02);
+        const cloudLayer2 = createCloudLayer(0.4, 12, 0.05);
+        scene.add(cloudLayer1);
+        scene.add(cloudLayer2);
+
+        const cloudLayers = [cloudLayer1, cloudLayer2];
+        loadingResources.texture = true;
+        checkAllLoaded();
+
+        // 添加云朵装饰（MeshBasicMaterial省GPU，8,6段数降低三角面）
+        function createCloud(x, y, z, scale = 1) {
+            const cloudGroup = new THREE.Group();
+            const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff }); // 无光照计算
+
+            const spheres = [
+                { pos: [0, 0, 0], r: 0.8 },
+                { pos: [0.6, 0.2, 0], r: 0.6 },
+                { pos: [-0.6, 0.1, 0], r: 0.55 },
+            ]; // 简化为3个球，减少DrawCall和三角面
+
+            spheres.forEach(s => {
+                const sphere = new THREE.Mesh(
+                    new THREE.SphereGeometry(s.r, 8, 6), // 8x6降低三角面
+                    cloudMat
+                );
+                sphere.position.set(...s.pos);
+                cloudGroup.add(sphere);
+            });
+            
+            cloudGroup.position.set(x, y, z);
+            cloudGroup.scale.setScalar(scale);
+            return cloudGroup;
+        }
+
+        const clouds = [
+            createCloud(-8, 5, -10, 1.5),
+            createCloud(10, 6, -15, 2),
+            createCloud(-5, 7, 8, 1.2),
+            createCloud(15, 5, 5, 1.8),
+        ];
+        clouds.forEach(cloud => scene.add(cloud));
+
+        // -------------------- 玩家状态（右手UI显示） --------------------
+        const playerStats = { hp: 100, score: 50, atk: 30 };
+
+        // -------------------- 左右手柄按键状态（左手UI显示） --------------------
+        const leftBtnState = { trigger: false, grip: false, stickBtn: false, btnX: false, btnY: false };
+        const rightBtnState = { trigger: false, grip: false, stickBtn: false, btnA: false, btnB: false };
+
+        // -------------------- 调试 UI 面板（右手腕 3D Canvas） --------------------
+        let debugPanel = null;
+        let debugCanvas = null;
+        let debugCtx = null;
+        let debugTexture = null;
+
+        function createDebugPanel() {
+            debugCanvas = document.createElement('canvas');
+            debugCanvas.width = 512;
+            debugCanvas.height = 256;
+            debugCtx = debugCanvas.getContext('2d');
+
+            debugTexture = new THREE.CanvasTexture(debugCanvas);
+
+            const panelGeo = new THREE.PlaneGeometry(0.18, 0.09);
+            const panelMat = new THREE.MeshBasicMaterial({
+                map: debugTexture,
+                transparent: true,
+                depthTest: false,
+                depthWrite: false,
+                side: THREE.DoubleSide
+            });
+            debugPanel = new THREE.Mesh(panelGeo, panelMat);
+
+            // 手腕背侧，稍微倾斜让玩家翻腕可见
+            debugPanel.position.set(0, 0.06, 0.04);
+            debugPanel.rotation.x = -Math.PI * 0.35;
+
+            drawDebugPanel('初始化中...');
+            return debugPanel;
+        }
+
+        function drawDebugPanel(info) {
+            if (!debugCtx) return;
+            const c = debugCtx;
+            const w = debugCanvas.width;
+            const h = debugCanvas.height;
+
+            c.clearRect(0, 0, w, h);
+            c.fillStyle = 'rgba(0,0,0,0.82)';
+            roundRect(c, 0, 0, w, h, 24);
+            c.fill();
+
+            c.strokeStyle = '#00ffcc';
+            c.lineWidth = 4;
+            roundRect(c, 2, 2, w - 4, h - 4, 22);
+            c.stroke();
+
+            c.fillStyle = '#ff3333';
+            c.font = 'bold 28px monospace';
+            c.fillText('❤️ 玩家状态', 18, 42);
+
+            c.fillStyle = '#ffffff';
+            c.font = '22px monospace';
+            const lines = info.split('\n');
+            lines.forEach((line, i) => {
+                c.fillText(line, 18, 80 + i * 30);
+            });
+
+            if (debugTexture) debugTexture.needsUpdate = true;
+        }
+
+        function roundRect(ctx, x, y, w, h, r) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+            ctx.lineTo(x + w, y + h - r);
+            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+            ctx.lineTo(x + r, y + h);
+            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+            ctx.lineTo(x, y + r);
+            ctx.quadraticCurveTo(x, y, x + r, y);
+            ctx.closePath();
+        }
+
+        function updateDebugPanel() {
+            if (!rightGrip || !debugPanel) return;
+
+            const activeBalloons = balloons.filter(b => b.userData.active).length;
+            const extraBulletStr = extraBulletEnabled ? '✅' : '❌';
+            const info = [
+                `❤️ 血量  ${playerStats.hp}`,
+                `🎯 得分  ${playerStats.score}`,
+                `⚔️ 攻击  ${playerStats.atk}`,
+                `🎈 气球  ${activeBalloons}/${BALLOON_COUNT}`,
+                `🔫 双弹  ${extraBulletStr}`
+            ].join('\n');
+
+            drawDebugPanel(info);
+        }
+
+        // -------------------- 左手激光角度 UI 面板 --------------------
+        let leftDebugPanel = null;
+        let leftDebugCanvas = null;
+        let leftDebugCtx = null;
+        let leftDebugTexture = null;
+
+        function createLeftDebugPanel() {
+            leftDebugCanvas = document.createElement('canvas');
+            leftDebugCanvas.width = 512;
+            leftDebugCanvas.height = 256;
+            leftDebugCtx = leftDebugCanvas.getContext('2d');
+
+            leftDebugTexture = new THREE.CanvasTexture(leftDebugCanvas);
+
+            const panelGeo = new THREE.PlaneGeometry(0.18, 0.09);
+            const panelMat = new THREE.MeshBasicMaterial({
+                map: leftDebugTexture,
+                transparent: true,
+                depthTest: false,
+                depthWrite: false,
+                side: THREE.DoubleSide
+            });
+            leftDebugPanel = new THREE.Mesh(panelGeo, panelMat);
+
+            // 手腕背侧，稍微倾斜让玩家翻腕可见
+            leftDebugPanel.position.set(0, 0.06, 0.04);
+            leftDebugPanel.rotation.x = -Math.PI * 0.35;
+
+            drawLeftDebugPanel('初始化中...');
+            return leftDebugPanel;
+        }
+
+        function drawLeftDebugPanel(info) {
+            if (!leftDebugCtx) return;
+            const c = leftDebugCtx;
+            const w = leftDebugCanvas.width;
+            const h = leftDebugCanvas.height;
+
+            c.clearRect(0, 0, w, h);
+            c.fillStyle = 'rgba(0,0,0,0.82)';
+            roundRect(c, 0, 0, w, h, 24);
+            c.fill();
+
+            c.strokeStyle = '#ff6600';
+            c.lineWidth = 4;
+            roundRect(c, 2, 2, w - 4, h - 4, 22);
+            c.stroke();
+
+            c.fillStyle = '#00ccff';
+            c.font = 'bold 28px monospace';
+            c.fillText('🎮 手柄按键', 18, 42);
+
+            c.fillStyle = '#ffffff';
+            c.font = '22px monospace';
+            const lines = info.split('\n');
+            lines.forEach((line, i) => {
+                c.fillText(line, 18, 80 + i * 30);
+            });
+
+            if (leftDebugTexture) leftDebugTexture.needsUpdate = true;
+        }
+
+        function updateLeftDebugPanel() {
+            if (!leftGrip || !leftDebugPanel) return;
+
+            const b = (pressed) => pressed ? '🟢' : '⚪';
+            const info = [
+                `左手 摇杆 ${leftInput.stickX.toFixed(2)},${leftInput.stickY.toFixed(2)}`,
+                `      扳机${b(leftBtnState.trigger)} 握柄${b(leftBtnState.grip)} 摇杆按下${b(leftBtnState.stickBtn)}`,
+                `      X键${b(leftBtnState.btnX)} Y键${b(leftBtnState.btnY)}`,
+                `右手 摇杆 ${rightInput.stickX.toFixed(2)},${rightInput.stickY.toFixed(2)}`,
+                `      扳机${b(rightBtnState.trigger)} 握柄${b(rightBtnState.grip)} 摇杆按下${b(rightBtnState.stickBtn)}`,
+                `      A键${b(rightBtnState.btnA)} B键${b(rightBtnState.btnB)}`
+            ].join('\n');
+
+            drawLeftDebugPanel(info);
+        }
+
+        // -------------------- 手柄模型 --------------------
+        const controllers = [];
+        let leftController, rightController;
+        let ak48Model = null;
+        let ak48Attached = false;
+        let rightGrip = null, leftGrip = null;
+
+        // 加载 AK48 枪支模型（Draco 压缩版本）
+        const dracoLoader = new DRACOLoader();
+        dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+        dracoLoader.setDecoderConfig({ type: 'js' });  // 强制使用 JS 解码器
+
+        const gltfLoader = new GLTFLoader();
+        gltfLoader.setDRACOLoader(dracoLoader);
+        gltfLoader.load(
+            'Ak48.glb',
+            (gltf) => {
+                console.log('✅ Ak48.glb 加载成功');
+                ak48Model = gltf.scene;
+                ak48Model.scale.set(1, 1, 1);
+                ak48Model.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
+                });
+                attachAK48();
+                loadingResources.model = true;
+                checkAllLoaded();
+            },
+            (progress) => {
+                if (progress.total > 0) {
+                    const pct = (progress.loaded / progress.total * 100).toFixed(1);
+                    document.getElementById('loading').innerHTML = 
+                        '<div id="loading-spinner"></div><div>加载模型: ' + pct + '%</div>';
+                }
+            },
+            (error) => {
+                console.error('❌ 模型加载失败:', error);
+                loadingResources.model = true;
+                onResourceError('⚠️ 模型加载失败');
+            }
+        );
+
+        function createControllerModel(isRight) {
+            const group = new THREE.Group();
+
+            // 激光已移除，手柄模型为空（AK48 枪支在 attachAK48 中单独附加）
+
+            return group;
+        }
+
+        function setupController(idx) {
+            const controller = renderer.xr.getController(idx);
+            const grip = renderer.xr.getControllerGrip(idx);
+            const model = createControllerModel(idx === 1);
+            grip.add(model);
+            dolly.add(controller);
+            dolly.add(grip);
+            controllers.push(controller);
+            
+            if (idx === 1) {
+                rightGrip = grip;
+                attachAK48();
+                // 玩家状态面板挂到右手腕
+                const panel = createDebugPanel();
+                grip.add(panel);
+            } else {
+                leftGrip = grip;
+                // 手柄按键状态面板挂到左手腕
+                const leftPanel = createLeftDebugPanel();
+                grip.add(leftPanel);
+            }
+            
+            if (idx === 0) leftController = controller;
+            else rightController = controller;
+        }
+
+        // ==================== AK48 枪支配置区 ====================
+        /*  枪支参数速查表（修改下方数值即可调整）
+            --------------------------------------------------
+            枪支整体缩放:                  AK48_SCALE = 0.6
+                                           1.0 = 原始大小，0.6 = 60%
+            --------------------------------------------------
+            枪支位置(相对于右手柄):        position.set(0, -0.1, 0.01)
+                                           X=0       左右偏移（正=右，负=左）
+                                           Y=-0.1    上下偏移（正=上，负=下）
+                                           Z=0.01    前后偏移（正=后，负=前）
+            --------------------------------------------------
+            枪支角度(相对于右手柄):        rotation.x = -20
+                                           rotation.y = Math.PI / 2 (即90度)
+                                           rotation.z = 0 (未设置，默认0)
+                                           注意：rotation.x = -20 是弧度值
+                                           如需角度制：-20 * Math.PI / 180 ≈ -0.349 弧度
+            --------------------------------------------------
+        */
+        const AK48_SCALE = 0.6;   // <-- 调整枪支整体大小
+
+        // 附加 AK48 到右手柄
+        function attachAK48() {
+            console.log('attachAK48 被调用', { 
+                hasModel: !!ak48Model, 
+                hasRightGrip: !!rightGrip, 
+                alreadyAttached: ak48Attached 
+            });
+            
+            if (!ak48Model) { console.log('AK48 模型尚未加载，跳过'); return; }
+            if (!rightGrip) { console.log('右手柄尚未初始化，跳过'); return; }
+            if (ak48Attached) { console.log('AK48 已附加，跳过'); return; }
+            
+            const gunInstance = ak48Model.clone();
+            
+            // 计算原始尺寸并应用缩放
+            const box = new THREE.Box3().setFromObject(gunInstance);
+            const size = new THREE.Vector3();
+            box.getSize(size);
+            console.log('AK48 原始尺寸:', size.x.toFixed(3), size.y.toFixed(3), size.z.toFixed(3));
+            console.log('AK48 当前缩放值:', AK48_SCALE, '→ 缩放后长度约:', (Math.max(size.x, size.y, size.z) * AK48_SCALE).toFixed(3), '米');
+            
+            gunInstance.scale.set(AK48_SCALE, AK48_SCALE, AK48_SCALE);
+            
+            gunInstance.traverse((child) => {
+                if (child.isMesh) child.castShadow = true;
+            });
+            
+            // ==================== 枪支位置和角度微调区 ====================
+            // 修改以下三行来调整枪在手柄上的位置和朝向
+            gunInstance.position.set(0, -0.1, 0.01);  // <-- 位置 XYZ（米）
+            gunInstance.rotation.x = -20;             // <-- X轴旋转（当前为-20弧度，约-1146度）
+            gunInstance.rotation.y = Math.PI / 2;     // <-- Y轴旋转 90度（枪管朝前）
+            
+            rightGrip.add(gunInstance);
+            ak48Attached = true;
+            console.log('AK48 已成功附加到右手柄');
+        }
+
+        renderer.xr.addEventListener('sessionstart', () => {
+            setShadow(false); // VR 模式关闭阴影
+            setTimeout(() => { attachAK48(); }, 100);
+            // VR开始时生成气球
+            setTimeout(() => {
+                if (!gameStarted) {
+                    gameStarted = true;
+                    spawnBalloons();
+                    console.log('🎈 气球战斗开始！');
+                }
+            }, 500);
+        });
+
+        // -------------------- 输入处理 --------------------
+        let rightTrigger = false;
+        let lastShootTime = 0;
+
+        function updateInputs() {
+            const session = renderer.xr.getSession();
+            if (!session) return;
+            rightInput.stickX = 0; rightInput.stickY = 0;
+            leftInput.stickX = 0; leftInput.stickY = 0;
+            rightTrigger = false;
+            // 重置按键状态
+            Object.keys(leftBtnState).forEach(k => leftBtnState[k] = false);
+            Object.keys(rightBtnState).forEach(k => rightBtnState[k] = false);
+
+            if (!session.inputSources) return;
+            for (const source of session.inputSources) {
+                if (!source.gamepad) continue;
+                const gp = source.gamepad;
+                const hand = source.handedness;
+                let sx = 0, sy = 0;
+                if (gp.axes.length >= 4) { sx = gp.axes[2]; sy = gp.axes[3]; }
+                else if (gp.axes.length >= 2) { sx = gp.axes[0]; sy = gp.axes[1]; }
+
+                const triggerVal = gp.buttons[0]?.value || 0;
+                const trigger = triggerVal > 0.5;
+                const grip = gp.buttons[1]?.pressed || false;
+                const stickBtn = gp.buttons[3]?.pressed || false;
+
+                if (hand === 'right') {
+                    rightInput.stickX = sx; rightInput.stickY = sy;
+                    rightTrigger = trigger;
+                    rightBtnState.trigger = trigger;
+                    rightBtnState.grip = grip;
+                    rightBtnState.stickBtn = stickBtn;
+                    rightBtnState.btnA = gp.buttons[4]?.pressed || false;
+                    rightBtnState.btnB = gp.buttons[5]?.pressed || false;
+                } else if (hand === 'left') {
+                    leftInput.stickX = sx; leftInput.stickY = sy;
+                    leftBtnState.trigger = trigger;
+                    leftBtnState.grip = grip;
+                    leftBtnState.stickBtn = stickBtn;
+                    leftBtnState.btnX = gp.buttons[4]?.pressed || false;
+                    leftBtnState.btnY = gp.buttons[5]?.pressed || false;
+                }
+            }
+        }
+
+        function handleShooting() {
+            if (!rightController || !rightTrigger) return;
+            const now = performance.now();
+            if (now - lastShootTime > SHOOT_COOLDOWN) {
+                shootBullet(rightController);
+                lastShootTime = now;
+            }
+        }
+
+        function handleMovement(dt) {
+            let sx = rightInput.stickX, sy = rightInput.stickY;
+            if (Math.abs(sx) < DEADZONE && Math.abs(sy) < DEADZONE) {
+                sx = leftInput.stickX; sy = leftInput.stickY;
+            }
+            if (Math.abs(sx) < DEADZONE && Math.abs(sy) < DEADZONE) {
+                // 摇杆回中，云海滚动逐渐减速
+                cloudScroll.x *= 0.92;
+                cloudScroll.y *= 0.92;
+                return;
+            }
+
+            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            forward.y = 0; forward.normalize();
+            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+            right.y = 0; right.normalize();
+
+            // 摇杆控制云海滚动方向和速度（摇杆前推 = 云向身后流 = 向前飞的错觉）
+            const intensity = Math.max(Math.abs(sx), Math.abs(sy));
+            const scrollSpeed = 2.0 * intensity;
+            cloudScroll.x = (forward.x * sy + right.x * sx) * scrollSpeed;
+            cloudScroll.y = (forward.z * sy + right.z * sx) * scrollSpeed;
+        }
+
+        function handleExit() {
+            const session = renderer.xr.getSession();
+            if (!session) return;
+            if (!session.inputSources) return;
+            for (const src of session.inputSources) {
+                if (!src.gamepad) continue;
+                if (src.handedness === 'right') {
+                    const btnA = src.gamepad.buttons[4]?.pressed;
+                    const btnB = src.gamepad.buttons[5]?.pressed;
+                    if (btnA || btnB) { session.end(); break; }
+                }
+            }
+        }
+
+        // -------------------- 动画循环 --------------------
+        const clock = new THREE.Clock();
+        const tempPos = new THREE.Vector3();
+
+        function updateCloudLayers(dt) {
+            camera.getWorldPosition(tempPos);
+            cloudLayers.forEach((layer, idx) => {
+                // 云海平滑跟随相机，但允许有轻微的滞后感
+                layer.position.x += (tempPos.x - layer.position.x) * 0.05;
+                layer.position.z += (tempPos.z - layer.position.z) * 0.05;
+
+                const tex = layer.userData.texture;
+                // 摇杆控制纹理滚动：不同层速度不同形成视差
+                const parallax = idx === 0 ? 1.0 : 0.6;
+                tex.offset.x += cloudScroll.x * dt * parallax;
+                tex.offset.y += cloudScroll.y * dt * parallax;
+            });
+        }
+
+        let gameStarted = false;
+
+        function animate() {
+            const dt = Math.min(clock.getDelta(), 0.1);
+
+            if (renderer.xr.isPresenting) {
+                updateInputs();
+                handleMovement(dt);
+                handleShooting();
+                updateBullets(dt);
+                updateBalloons(dt);
+                checkBulletBalloonCollisions();
+                checkLeftHandChoiceCardCollision();
+                handleExit();
+                // 调试面板每5帧更新一次（Canvas重绘+GPU纹理上传较重）
+                if (!animate._frameCount) animate._frameCount = 0;
+                animate._frameCount++;
+                if (animate._frameCount % 5 === 0) {
+                    updateDebugPanel();
+                    updateLeftDebugPanel();
+                }
+                updateCloudLayers(dt);
+                vrEntryEl.style.display = 'none';
+                vrHintsEl.style.display = 'none';
+            } else {
+                updateCloudLayers(dt);
+                vrEntryEl.style.display = 'block';
+                vrHintsEl.style.display = 'flex';
+            }
+
+            renderer.render(scene, camera);
+        }
+        renderer.setAnimationLoop(animate);
+
+        // -------------------- 初始化 --------------------
+        async function initScene() {
+            setupController(0);
+            setupController(1);
+
+            // 进入 VR 核心函数
+            async function enterVR() {
+                if (enterVRBtn.disabled) return;
+                enterVRBtn.disabled = true;
+                enterVRBtn.textContent = '⏳ 启动中...';
+                try {
+                    if (!navigator.xr) {
+                        throw new Error('浏览器不支持 WebXR');
+                    }
+                    
+                    let session;
+                    try {
+                        if (navigator.xr.isSessionSupported) {
+                            const supported = await navigator.xr.isSessionSupported('immersive-vr');
+                            if (!supported) throw new Error('设备不支持VR');
+                        }
+                        session = await navigator.xr.requestSession('immersive-vr', {
+                            requiredFeatures: ['local-floor']
+                        });
+                    } catch (e) {
+                        console.log('使用 PICO 兼容模式:', e.message);
+                        session = await navigator.xr.requestSession('immersive-vr');
+                    }
+                    
+                    renderer.xr.setSession(session);
+                    enterVRBtn.disabled = false;
+                    enterVRBtn.textContent = '🎈 进入VR场景';
+                } catch (err) {
+                    statusMsgEl.innerHTML = '❌ ' + err.message;
+                    statusMsgEl.classList.add('error');
+                    enterVRBtn.disabled = false;
+                    enterVRBtn.textContent = '🎈 进入VR场景';
+                }
+            }
+
+            // 按钮点击进入 VR
+            enterVRBtn.onclick = enterVR;
+            // 点击页面任意位置也能进入 VR
+            document.body.onclick = enterVR;
+            document.body.ontouchstart = enterVR;
+
+            renderer.xr.addEventListener('sessionend', () => {
+                setShadow(true); // 退出 VR 恢复阴影
+                enterVRBtn.disabled = false;
+                vrEntryEl.style.display = 'block';
+                vrHintsEl.style.display = 'flex';
+                statusMsgEl.style.display = 'none';
+            });
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            // 页面卸载时清理资源
+            window.addEventListener('beforeunload', () => {
+                renderer.dispose();
+                scene.traverse(obj => {
+                    if (obj.geometry) obj.geometry.dispose();
+                    if (obj.material) {
+                        if (Array.isArray(obj.material)) {
+                            obj.material.forEach(m => m.dispose());
+                        } else {
+                            obj.material.dispose();
+                        }
+                    }
+                });
+                cloudLayers.forEach(layer => {
+                    if (layer.userData.texture) layer.userData.texture.dispose();
+                    if (layer.material) layer.material.dispose();
+                    if (layer.geometry) layer.geometry.dispose();
+                });
+                dracoLoader.dispose();
+            });
+        }
+
+        initScene();
+    </script>
+</body>
+</html>
