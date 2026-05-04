@@ -65,6 +65,29 @@
             animation: spin 1s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        #time-switch {
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+            z-index: 25; display: flex; gap: 10px;
+        }
+        .time-btn {
+            padding: 10px 24px; font-size: 15px; font-weight: 700;
+            letter-spacing: 1px; color: #fff; border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 30px; cursor: pointer; outline: none;
+            background: rgba(0,0,0,0.4); backdrop-filter: blur(8px);
+            transition: all 0.3s ease;
+        }
+        .time-btn:hover { background: rgba(255,255,255,0.2); border-color: #fff; }
+        .time-btn.active { background: rgba(255,255,255,0.3); border-color: #ffd700; box-shadow: 0 0 16px rgba(255,215,0,0.5); }
+        .time-btn:nth-child(1) { border-left: 3px solid #ffaa00; } /* 黄昏 */
+        .time-btn:nth-child(2) { border-left: 3px solid #4da6ff; } /* 白天 */
+        .time-btn:nth-child(3) { border-left: 3px solid #8899ff; } /* 夜晚 */
+
+        #sky-hint {
+            position: fixed; top: 80px; left: 50%; transform: translateX(-50%);
+            z-index: 24; pointer-events: none;
+            color: rgba(255,255,255,0.6); font-size: 12px; letter-spacing: 1px;
+        }
     </style>
 </head>
 <body>
@@ -82,8 +105,15 @@
         <span class="hint-badge">🔫 <span class="key">扳机</span> 射击</span>
         <span class="hint-badge">🕹️ <span class="key">摇杆</span> 移动</span>
         <span class="hint-badge">🅰️ <span class="key">A键</span> 退出</span>
+        <span class="hint-badge">🌤️ <span class="key">X/Y键</span> 切天空</span>
     </div>
     <div id="status-msg"></div>
+    <div id="time-switch">
+        <button id="btn-dusk" class="time-btn">🌅 黄昏</button>
+        <button id="btn-day" class="time-btn active">☀️ 白天</button>
+        <button id="btn-night" class="time-btn">🌙 夜晚</button>
+    </div>
+    <div id="sky-hint">VR中按左手 X/Y 键切换天空 · 30秒渐变过渡</div>
 
     <!-- 本地文件，HTTP 服务器即可，PICO 浏览器无需访问任何外部网络 -->
     <script type="importmap">
@@ -303,8 +333,6 @@
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x87CEEB);
         scene.fog = new THREE.Fog(0x87CEEB, 30, 100);
-
-        // 渲染器清除色与背景一致，避免快速转头时边缘露出黑色
         renderer.setClearColor(new THREE.Color(0x87CEEB));
 
         const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 200);
@@ -313,24 +341,86 @@
         dolly.add(camera);
         scene.add(dolly);
 
-        // 天空穹顶（半球），跟随相机移动，转头再快也不会露出黑边
-        function createSkyDome() {
-            // SphereGeometry: phiLength=PI 整球，thetaLength=PI/2 则只显示上半球（天空）
-            const skyGeo = new THREE.SphereGeometry(60, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-            const skyMat = new THREE.MeshBasicMaterial({
-                color: 0x87CEEB,
-                side: THREE.BackSide,
-                depthWrite: false
-            });
-            const sky = new THREE.Mesh(skyGeo, skyMat);
-            // 穹顶底部对齐玩家眼高，完整包裹头顶和四周
-            sky.position.y = 1.6;
-            return sky;
-        }
-        dolly.add(createSkyDome()); // 随玩家移动，完全填满 VR 全视角
+        // ==================== 日夜黄昏天空系统 ====================
+        // 天空穹顶（可动态变色）
+        const skyDomeGeo = new THREE.SphereGeometry(60, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+        const skyDomeMat = new THREE.MeshBasicMaterial({
+            color: 0x87CEEB, side: THREE.BackSide, depthWrite: false
+        });
+        const skyDome = new THREE.Mesh(skyDomeGeo, skyDomeMat);
+        skyDome.position.y = 1.6;
+        dolly.add(skyDome);
 
-        // 光照
-        scene.add(new THREE.AmbientLight(0xffeedd, 1.2));
+        // 星空粒子（夜晚可见，三层叠加制造闪烁感）
+        // 圆形光点纹理（消除方片）
+        function createGlowTexture(innerColor, outerColor, size) {
+            const canvas = document.createElement('canvas');
+            canvas.width = size; canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            const g = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+            g.addColorStop(0, innerColor);
+            g.addColorStop(0.15, innerColor);
+            g.addColorStop(0.5, outerColor);
+            g.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = g; ctx.fillRect(0, 0, size, size);
+            return new THREE.CanvasTexture(canvas);
+        }
+        const starTex = createGlowTexture('white', 'rgba(180,200,255,0.6)', 64);
+        const starLayers = [];
+        for (let layer = 0; layer < 3; layer++) {
+            const starGeo = new THREE.BufferGeometry();
+            const count = 80 + layer * 50; // 80 + 130 + 180 = 390 颗
+            const positions = new Float32Array(count * 3);
+            const twinkleData = new Float32Array(count * 2);
+            for (let i = 0; i < count; i++) {
+                const theta = Math.random() * Math.PI * 2;
+                // 幂函数分布：头顶最密，地平线附近稀疏（模拟真实星空）
+                const phi = Math.pow(Math.random(), 2.5) * Math.PI * 0.48;
+                const r = 48 + Math.random() * 4 + layer * 1.5;
+                positions[i * 3] = Math.sin(phi) * Math.cos(theta) * r;
+                positions[i * 3 + 1] = Math.cos(phi) * r + 1.6;
+                positions[i * 3 + 2] = Math.sin(phi) * Math.sin(theta) * r;
+                twinkleData[i * 2] = Math.random() * Math.PI * 2;
+                twinkleData[i * 2 + 1] = 0.3 + Math.random() * 1.5;
+            }
+            starGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            const starMat = new THREE.PointsMaterial({
+                map: starTex,
+                color: 0xffffff,
+                size: 0.35 + layer * 0.1,
+                transparent: true,
+                opacity: 0,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            });
+            const starField = new THREE.Points(starGeo, starMat);
+            starField.userData = { twinkle: twinkleData, baseOpacity: 0 };
+            dolly.add(starField);
+            starLayers.push(starField);
+        }
+
+        // ── 太阳/月亮精灵（可见天体）──
+        const sunTex = createGlowTexture('rgba(255,255,200,1)', 'rgba(255,180,50,0.4)', 256);
+        const sunSpriteMat = new THREE.SpriteMaterial({
+            map: sunTex, color: 0xfff8dc,
+            transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 1
+        });
+        const sunSprite = new THREE.Sprite(sunSpriteMat);
+        sunSprite.scale.set(8, 8, 1);
+        sunSprite.position.set(17, 34, 9);
+        dolly.add(sunSprite);
+
+        const moonTex = createGlowTexture('rgba(220,230,255,1)', 'rgba(150,180,220,0.3)', 256);
+        const moonSpriteMat = new THREE.SpriteMaterial({
+            map: moonTex, color: 0xddeeff,
+            transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0
+        });
+        const moonSprite = new THREE.Sprite(moonSpriteMat);
+        moonSprite.scale.set(5, 5, 1);
+        moonSprite.position.set(-8, 38, -13);
+        dolly.add(moonSprite);
+
+        // 太阳光（方向光）
         const sunLight = new THREE.DirectionalLight(0xffffff, 2.5);
         sunLight.position.set(20, 40, 10);
         sunLight.castShadow = true;
@@ -343,9 +433,162 @@
         sunLight.shadow.camera.top = 30;
         sunLight.shadow.camera.bottom = -30;
         scene.add(sunLight);
-        scene.add(new THREE.HemisphereLight(0x87CEEB, 0x90EE90, 0.8));
 
-        // ==================== 子弹系统配置 ====================
+        // 环境光 & 半球光（保存引用以便动态更新）
+        const ambientLight = new THREE.AmbientLight(0xffeedd, 1.2);
+        scene.add(ambientLight);
+        const hemiLight = new THREE.HemisphereLight(0x87CEEB, 0x90EE90, 0.8);
+        scene.add(hemiLight);
+
+        // ── 天空预设：白天 / 黄昏 / 夜晚 ──
+        const skyPresets = {
+            day: {
+                bg: 0x87CEEB, fog: 0x87CEEB, fogNear: 30, fogFar: 100,
+                skyDome: 0x87CEEB, ambient: 0xffeedd, ambientI: 1.2,
+                sun: 0xfffef5, sunI: 2.5, sunX: 20, sunY: 40, sunZ: 10,
+                hemiSky: 0x87CEEB, hemiGround: 0x90EE90, hemiI: 0.8,
+                stars: 0,
+                sunElev: 50, moonElev: -30   // 太阳高空，月亮在地平线下
+            },
+            dusk: {
+                bg: 0xe85d26, fog: 0xe87544, fogNear: 20, fogFar: 80,
+                skyDome: 0xe86830, ambient: 0xffccaa, ambientI: 0.7,
+                sun: 0xff9955, sunI: 1.8, sunX: 30, sunY: 8, sunZ: 5,
+                hemiSky: 0xff5511, hemiGround: 0x553322, hemiI: 0.5,
+                stars: 0.25,
+                sunElev: 5, moonElev: 5      // 太阳贴地平线，月亮对面刚升起
+            },
+            night: {
+                bg: 0x0a0a28, fog: 0x0c0c2a, fogNear: 15, fogFar: 60,
+                skyDome: 0x0e0e30, ambient: 0x1a2a55, ambientI: 0.35,
+                sun: 0x8899cc, sunI: 0.5, sunX: -10, sunY: 45, sunZ: -15,
+                hemiSky: 0x0a0a3a, hemiGround: 0x0f0f1a, hemiI: 0.2,
+                stars: 1.0,
+                sunElev: -25, moonElev: 50   // 太阳沉入地下，月亮高悬
+            }
+        };
+
+        // 当前天空状态（会被 lerp 到目标预设）
+        const skyNow = {
+            bg: new THREE.Color(skyPresets.day.bg),
+            fog: new THREE.Color(skyPresets.day.fog),
+            fogNear: 30, fogFar: 100,
+            skyDome: new THREE.Color(skyPresets.day.skyDome),
+            ambient: new THREE.Color(skyPresets.day.ambient),
+            ambientI: skyPresets.day.ambientI,
+            sun: new THREE.Color(skyPresets.day.sun),
+            sunI: skyPresets.day.sunI,
+            sunX: 20, sunY: 40, sunZ: 10,
+            hemiSky: new THREE.Color(skyPresets.day.hemiSky),
+            hemiGround: new THREE.Color(skyPresets.day.hemiGround),
+            hemiI: skyPresets.day.hemiI,
+            stars: 0,
+            sunElev: 50, moonElev: -30
+        };
+        let skyTarget = 'day';
+
+        function applySkyTarget(name) {
+            skyTarget = name; // 仅设置目标，过渡由 updateSkyTransition 完成
+        }
+
+        function updateSkyTransition(dt) {
+            const p = skyPresets[skyTarget];
+            const ease = 1 - Math.exp(-0.12 * dt); // ~30秒完成95%过渡
+
+            skyNow.bg.lerp(new THREE.Color(p.bg), ease);
+            skyNow.fog.lerp(new THREE.Color(p.fog), ease);
+            skyNow.skyDome.lerp(new THREE.Color(p.skyDome), ease);
+            skyNow.ambient.lerp(new THREE.Color(p.ambient), ease);
+            skyNow.sun.lerp(new THREE.Color(p.sun), ease);
+            skyNow.hemiSky.lerp(new THREE.Color(p.hemiSky), ease);
+            skyNow.hemiGround.lerp(new THREE.Color(p.hemiGround), ease);
+
+            skyNow.ambientI += (p.ambientI - skyNow.ambientI) * ease;
+            skyNow.sunI    += (p.sunI    - skyNow.sunI)    * ease;
+            skyNow.hemiI   += (p.hemiI   - skyNow.hemiI)   * ease;
+            skyNow.sunX    += (p.sunX    - skyNow.sunX)    * ease;
+            skyNow.sunY    += (p.sunY    - skyNow.sunY)    * ease;
+            skyNow.sunZ    += (p.sunZ    - skyNow.sunZ)    * ease;
+            skyNow.fogNear += (p.fogNear - skyNow.fogNear) * ease;
+            skyNow.fogFar  += (p.fogFar  - skyNow.fogFar)  * ease;
+            skyNow.stars   += (p.stars   - skyNow.stars)   * ease;
+            skyNow.sunElev += (p.sunElev - skyNow.sunElev) * ease;
+            skyNow.moonElev += (p.moonElev - skyNow.moonElev) * ease;
+
+            // 应用到场景
+            scene.background.copy(skyNow.bg);
+            scene.fog.color.copy(skyNow.fog);
+            scene.fog.near = skyNow.fogNear;
+            scene.fog.far  = skyNow.fogFar;
+            renderer.setClearColor(skyNow.bg);
+            skyDomeMat.color.copy(skyNow.skyDome);
+            ambientLight.color.copy(skyNow.ambient);
+            ambientLight.intensity = skyNow.ambientI;
+            sunLight.color.copy(skyNow.sun);
+            sunLight.intensity = skyNow.sunI;
+            sunLight.position.set(skyNow.sunX, skyNow.sunY, skyNow.sunZ);
+            hemiLight.color.copy(skyNow.hemiSky);
+            hemiLight.groundColor.copy(skyNow.hemiGround);
+            hemiLight.intensity = skyNow.hemiI;
+
+            // ── 太阳/月亮精灵：用独立仰角控制升降（不跟随光照方向）──
+            const sunAzimuth = Math.atan2(skyNow.sunX, skyNow.sunZ);
+            const moonAzimuth = sunAzimuth + Math.PI;
+            const D2R = Math.PI / 180;
+
+            function placeSprite(sprite, azimuth, elevDeg, dist) {
+                const el = elevDeg * D2R;
+                const cosEl = Math.cos(el);
+                sprite.position.x = Math.sin(azimuth) * cosEl * dist;
+                sprite.position.y = Math.sin(el) * dist + 1.6;
+                sprite.position.z = Math.cos(azimuth) * cosEl * dist;
+            }
+            placeSprite(sunSprite, sunAzimuth, skyNow.sunElev, 45);
+            placeSprite(moonSprite, moonAzimuth, skyNow.moonElev, 42);
+
+            // 透明度：仰角 > -3° 开始淡入，> 5° 完全可见
+            sunSprite.material.opacity  = Math.max(0, Math.min(1, (skyNow.sunElev + 3) / 8));
+            moonSprite.material.opacity = Math.max(0, Math.min(1, (skyNow.moonElev + 3) / 8));
+
+            // ── 星空闪烁 + 缓慢旋转（三层独立运动）──
+            const now = performance.now() * 0.001;
+            starLayers.forEach((sf, idx) => {
+                sf.rotation.y += dt * (0.015 + idx * 0.01);
+                const base = skyNow.stars * (0.7 + idx * 0.15);
+                const flicker = 0.85 + 0.15 * Math.sin(now * 1.7 + idx * 2.1);
+                sf.material.opacity = Math.min(1, base * flicker);
+            });
+        }
+
+        // ── 时间切换按钮 ──
+        const timeBtns = {
+            day: document.getElementById('btn-day'),
+            dusk: document.getElementById('btn-dusk'),
+            night: document.getElementById('btn-night')
+        };
+        function setActiveTimeBtn(name) {
+            Object.keys(timeBtns).forEach(k => timeBtns[k].classList.remove('active'));
+            if (timeBtns[name]) timeBtns[name].classList.add('active');
+        }
+        timeBtns.day.addEventListener('click', () => { applySkyTarget('day'); setActiveTimeBtn('day'); });
+        timeBtns.dusk.addEventListener('click', () => { applySkyTarget('dusk'); setActiveTimeBtn('dusk'); });
+        timeBtns.night.addEventListener('click', () => { applySkyTarget('night'); setActiveTimeBtn('night'); });
+
+        // ── VR 手柄切天空：左手 X/Y 键循环切换 ──
+        const skyCycle = ['day', 'dusk', 'night'];
+        function cycleSky(direction = 1) {
+            const idx = skyCycle.indexOf(skyTarget);
+            const next = skyCycle[(idx + direction + 3) % 3];
+            applySkyTarget(next);
+            setActiveTimeBtn(next);
+        }
+        let prevLeftX = false, prevLeftY = false;
+        function checkVRSkySwitch() {
+            if (leftBtnState.btnX && !prevLeftX) cycleSky(1);   // 左手X → 黄昏→夜晚→白天
+            if (leftBtnState.btnY && !prevLeftY) cycleSky(-1);  // 左手Y → 白天→夜晚→黄昏
+            prevLeftX = leftBtnState.btnX;
+            prevLeftY = leftBtnState.btnY;
+        }
         /*  子弹参数速查表（修改下方数值即可调整）
             --------------------------------------------------
             发射口位置(相对于右手控制器):  muzzleLocal (0, 0, -0.2)
@@ -1521,6 +1764,9 @@
         function animate() {
             const dt = Math.min(clock.getDelta(), 0.1);
 
+            // 天空过渡（VR/非VR 都持续更新）
+            updateSkyTransition(dt);
+
             if (renderer.xr.isPresenting) {
                 updateInputs();
                 handleMovement(dt);
@@ -1530,6 +1776,7 @@
                 checkBulletBalloonCollisions();
                 checkLeftHandChoiceCardCollision();
                 handleExit();
+                checkVRSkySwitch(); // 左手X/Y键切换天空
                 // 调试面板每5帧更新一次（Canvas重绘+GPU纹理上传较重）
                 if (!animate._frameCount) animate._frameCount = 0;
                 animate._frameCount++;
