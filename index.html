@@ -169,8 +169,7 @@
         const rightInput = { stickX: 0, stickY: 0 };
         const leftInput = { stickX: 0, stickY: 0 };
 
-        // 云海滚动速度（由摇杆控制）
-        const cloudScroll = { x: 0, y: 0 };
+        
 
         const MOVE_SPEED = 3.5;
         const DEADZONE = 0.2;
@@ -399,26 +398,78 @@
             starLayers.push(starField);
         }
 
-        // ── 太阳/月亮精灵（可见天体）──
-        const sunTex = createGlowTexture('rgba(255,255,200,1)', 'rgba(255,180,50,0.4)', 256);
+        // ── 太阳/月亮精灵（优先加载 sun.png / moon.png，失败则 Canvas 自动生成）──
+        // 图片要求：PNG 格式、透明背景、建议 512×512，放到 index.html 同级目录
+        function loadSpriteImage(path, spriteMat) {
+            const img = new Image();
+            img.onload = () => {
+                const tex = new THREE.CanvasTexture(img);
+                tex.colorSpace = THREE.SRGBColorSpace;
+                spriteMat.map?.dispose();
+                spriteMat.map = tex;
+                spriteMat.needsUpdate = true;
+                console.log('✅ 已加载:', path);
+            };
+            img.src = path; // 404 静默忽略
+        }
+
+        // ── 太阳 Canvas 纹理 ──
+        const sunCanvas = document.createElement('canvas');
+        sunCanvas.width = 512; sunCanvas.height = 512;
+        (() => {
+            const c = sunCanvas.getContext('2d'), cx = 256, cy = 256;
+            const g = c.createRadialGradient(cx, cy, 30, cx, cy, 250);
+            g.addColorStop(0, 'rgba(255,255,220,1)');
+            g.addColorStop(0.08, 'rgba(255,255,200,1)');
+            g.addColorStop(0.25, 'rgba(255,200,80,0.8)');
+            g.addColorStop(0.5, 'rgba(255,140,30,0.25)');
+            g.addColorStop(1, 'rgba(255,80,10,0)');
+            c.fillStyle = g; c.fillRect(0, 0, 512, 512);
+        })();
+        const sunTex = new THREE.CanvasTexture(sunCanvas);
+        sunTex.colorSpace = THREE.SRGBColorSpace;
         const sunSpriteMat = new THREE.SpriteMaterial({
-            map: sunTex, color: 0xfff8dc,
-            transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 1
+            map: sunTex, color: 0xffffff,
+            transparent: true, depthWrite: false, blending: THREE.NormalBlending, opacity: 1
         });
         const sunSprite = new THREE.Sprite(sunSpriteMat);
         sunSprite.scale.set(8, 8, 1);
-        sunSprite.position.set(17, 34, 9);
         dolly.add(sunSprite);
 
-        const moonTex = createGlowTexture('rgba(220,230,255,1)', 'rgba(150,180,220,0.3)', 256);
+        // ── 月牙 Canvas 纹理（纯路径，无 composite 黑边）──
+        const moonCanvas = document.createElement('canvas');
+        moonCanvas.width = 512; moonCanvas.height = 512;
+        (() => {
+            const c = moonCanvas.getContext('2d'), cx = 256, cy = 256, R = 200;
+            // 柔光
+            const g = c.createRadialGradient(cx, cy, R * 0.12, cx, cy, R * 0.7);
+            g.addColorStop(0, 'rgba(200,220,255,0.5)');
+            g.addColorStop(0.5, 'rgba(140,170,220,0.1)');
+            g.addColorStop(1, 'rgba(255,255,255,0)');
+            c.fillStyle = g; c.fillRect(0, 0, 512, 512);
+            // 月牙：外弧 + 反向内弧
+            const cutX = cx + R * 0.35, cutY = cy - R * 0.08, cutR = R * 0.82;
+            const a1 = -Math.PI * 0.42, a2 = Math.PI * 0.42;
+            c.fillStyle = 'rgba(232,240,255,0.92)';
+            c.beginPath();
+            c.arc(cx, cy, R, a1, a2);
+            c.arc(cutX, cutY, cutR, a2, a1, true);
+            c.closePath();
+            c.fill();
+        })();
+        const moonTex = new THREE.CanvasTexture(moonCanvas);
+        moonTex.colorSpace = THREE.SRGBColorSpace;
         const moonSpriteMat = new THREE.SpriteMaterial({
-            map: moonTex, color: 0xddeeff,
+            map: moonTex, color: 0xffffff,
             transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0
         });
         const moonSprite = new THREE.Sprite(moonSpriteMat);
         moonSprite.scale.set(5, 5, 1);
-        moonSprite.position.set(-8, 38, -13);
         dolly.add(moonSprite);
+
+        // 尝试加载外部图片（放 index.html 同级目录即可）
+        loadSpriteImage('sun.png', sunSpriteMat);
+        loadSpriteImage('moon.png', moonSpriteMat);
 
         // 太阳光（方向光）
         const sunLight = new THREE.DirectionalLight(0xffffff, 2.5);
@@ -441,6 +492,7 @@
         scene.add(hemiLight);
 
         // ── 天空预设：白天 / 黄昏 / 夜晚 ──
+        const DAY_SUN_AZ = Math.atan2(20, 10); // 正午太阳方位 ≈ 1.107 rad
         const skyPresets = {
             day: {
                 bg: 0x87CEEB, fog: 0x87CEEB, fogNear: 30, fogFar: 100,
@@ -448,7 +500,7 @@
                 sun: 0xfffef5, sunI: 2.5, sunX: 20, sunY: 40, sunZ: 10,
                 hemiSky: 0x87CEEB, hemiGround: 0x90EE90, hemiI: 0.8,
                 stars: 0,
-                sunElev: 50, moonElev: -30   // 太阳高空，月亮在地平线下
+                sunElev: 50, moonElev: -30, moonAz: DAY_SUN_AZ
             },
             dusk: {
                 bg: 0xe85d26, fog: 0xe87544, fogNear: 20, fogFar: 80,
@@ -456,7 +508,7 @@
                 sun: 0xff9955, sunI: 1.8, sunX: 30, sunY: 8, sunZ: 5,
                 hemiSky: 0xff5511, hemiGround: 0x553322, hemiI: 0.5,
                 stars: 0.25,
-                sunElev: 5, moonElev: 5      // 太阳贴地平线，月亮对面刚升起
+                sunElev: 5, moonElev: 5, moonAz: Math.atan2(30, 5) + Math.PI
             },
             night: {
                 bg: 0x0a0a28, fog: 0x0c0c2a, fogNear: 15, fogFar: 60,
@@ -464,7 +516,7 @@
                 sun: 0x8899cc, sunI: 0.5, sunX: -10, sunY: 45, sunZ: -15,
                 hemiSky: 0x0a0a3a, hemiGround: 0x0f0f1a, hemiI: 0.2,
                 stars: 1.0,
-                sunElev: -25, moonElev: 50   // 太阳沉入地下，月亮高悬
+                sunElev: -25, moonElev: 50, moonAz: DAY_SUN_AZ  // 月亮在正午太阳位
             }
         };
 
@@ -483,7 +535,7 @@
             hemiGround: new THREE.Color(skyPresets.day.hemiGround),
             hemiI: skyPresets.day.hemiI,
             stars: 0,
-            sunElev: 50, moonElev: -30
+            sunElev: 50, moonElev: -30, moonAz: DAY_SUN_AZ
         };
         let skyTarget = 'day';
 
@@ -514,6 +566,7 @@
             skyNow.stars   += (p.stars   - skyNow.stars)   * ease;
             skyNow.sunElev += (p.sunElev - skyNow.sunElev) * ease;
             skyNow.moonElev += (p.moonElev - skyNow.moonElev) * ease;
+            skyNow.moonAz  += (p.moonAz  - skyNow.moonAz)  * ease;
 
             // 应用到场景
             scene.background.copy(skyNow.bg);
@@ -531,9 +584,8 @@
             hemiLight.groundColor.copy(skyNow.hemiGround);
             hemiLight.intensity = skyNow.hemiI;
 
-            // ── 太阳/月亮精灵：用独立仰角控制升降（不跟随光照方向）──
+            // ── 太阳跟随光照方向，月亮用独立方位角 ──
             const sunAzimuth = Math.atan2(skyNow.sunX, skyNow.sunZ);
-            const moonAzimuth = sunAzimuth + Math.PI;
             const D2R = Math.PI / 180;
 
             function placeSprite(sprite, azimuth, elevDeg, dist) {
@@ -544,20 +596,26 @@
                 sprite.position.z = Math.cos(azimuth) * cosEl * dist;
             }
             placeSprite(sunSprite, sunAzimuth, skyNow.sunElev, 45);
-            placeSprite(moonSprite, moonAzimuth, skyNow.moonElev, 42);
+            placeSprite(moonSprite, skyNow.moonAz, skyNow.moonElev, 42);
 
             // 透明度：仰角 > -3° 开始淡入，> 5° 完全可见
             sunSprite.material.opacity  = Math.max(0, Math.min(1, (skyNow.sunElev + 3) / 8));
             moonSprite.material.opacity = Math.max(0, Math.min(1, (skyNow.moonElev + 3) / 8));
 
-            // ── 星空闪烁 + 缓慢旋转（三层独立运动）──
-            const now = performance.now() * 0.001;
-            starLayers.forEach((sf, idx) => {
-                sf.rotation.y += dt * (0.015 + idx * 0.01);
-                const base = skyNow.stars * (0.7 + idx * 0.15);
-                const flicker = 0.85 + 0.15 * Math.sin(now * 1.7 + idx * 2.1);
-                sf.material.opacity = Math.min(1, base * flicker);
-            });
+            // ── 星空闪烁 + 缓慢旋转（白天直接关闭，不占性能）──
+            const starsActive = skyNow.stars > 0.01;
+            if (starsActive) {
+                const now = performance.now() * 0.001;
+                starLayers.forEach((sf, idx) => {
+                    sf.visible = true;
+                    sf.rotation.y += dt * (0.015 + idx * 0.01);
+                    const base = skyNow.stars * (0.7 + idx * 0.15);
+                    const flicker = 0.85 + 0.15 * Math.sin(now * 1.7 + idx * 2.1);
+                    sf.material.opacity = Math.min(1, base * flicker);
+                });
+            } else {
+                starLayers.forEach(sf => { sf.visible = false; });
+            }
         }
 
         // ── 时间切换按钮 ──
@@ -1178,33 +1236,10 @@
             return new THREE.CanvasTexture(canvas);
         }
 
-        function createCloudLayer(y, repeatCount, speed) {
-            const texture = createCartoonCloudTexture();
-            texture.wrapS = THREE.RepeatWrapping;
-            texture.wrapT = THREE.RepeatWrapping;
-            texture.repeat.set(repeatCount, repeatCount);
+        function createCloudLayer(y, repeatCount, speed) { /* 已废弃 */ }
 
-            const geometry = new THREE.CircleGeometry(80, 64);
-            const material = new THREE.MeshBasicMaterial({
-                map: texture,
-                transparent: true,
-                depthWrite: false,
-                side: THREE.DoubleSide,
-            });
-
-            const mesh = new THREE.Mesh(geometry, material);
-            mesh.rotation.x = -Math.PI / 2;
-            mesh.position.y = y;
-            mesh.userData = { speed, texture };
-            return mesh;
-        }
-
-        const cloudLayer1 = createCloudLayer(0, 25, 0.02);
-        const cloudLayer2 = createCloudLayer(0.4, 12, 0.05);
-        scene.add(cloudLayer1);
-        scene.add(cloudLayer2);
-
-        const cloudLayers = [cloudLayer1, cloudLayer2];
+        // 脚下云海已移除 — 改为真实 dolly 移动
+        const cloudLayers = [];
         loadingResources.texture = true;
         checkAllLoaded();
 
@@ -1233,11 +1268,14 @@
             return cloudGroup;
         }
 
+        // 装饰云朵（散布在场景中，dolly 真移动后自然产生相对运动）
         const clouds = [
-            createCloud(-8, 5, -10, 1.5),
-            createCloud(10, 6, -15, 2),
-            createCloud(-5, 7, 8, 1.2),
-            createCloud(15, 5, 5, 1.8),
+            createCloud(-8, 5, -10, 1.5), createCloud(10, 6, -15, 2),
+            createCloud(-5, 7, 8, 1.2),   createCloud(15, 5, 5, 1.8),
+            createCloud(3, 8, -20, 2.2),  createCloud(-12, 4, 3, 1.0),
+            createCloud(20, 6, -8, 1.6),  createCloud(-18, 5, -12, 1.4),
+            createCloud(0, 9, 15, 2.5),   createCloud(-8, 3, -25, 1.3),
+            createCloud(25, 7, 10, 1.7),  createCloud(-22, 4, -18, 1.1),
         ];
         clouds.forEach(cloud => scene.add(cloud));
 
@@ -1460,6 +1498,54 @@
                 console.error('❌ 模型加载失败:', error);
                 loadingResources.model = true;
                 onResourceError('⚠️ 模型加载失败');
+            }
+        );
+
+        // ==================== ReQiQiu1 热气球模型配置 ====================
+        /*  热气球参数速查表（修改下方数值即可调整）
+            --------------------------------------------------
+            模型位置(世界坐标):       position.set(0, 0, -5)
+                                        X=0    左右（正=右，负=左）
+                                        Y=0    上下（正=上，负=下）
+                                        Z=-5   前后（正=后，负=前）
+            --------------------------------------------------
+            模型旋转(弧度):           rotation.set(0, 0, 0)
+                                        X=0    俯仰（绕X轴）
+                                        Y=0    偏航（绕Y轴）
+                                        Z=0    翻滚（绕Z轴）
+            --------------------------------------------------
+            模型缩放:                 ReQiQiu1_SCALE = 1.0
+                                        1.0 = 原始大小
+            --------------------------------------------------
+        */
+        const ReQiQiu1_SCALE = 1.0;       // <-- 热气球缩放
+        const ReQiQiu1_POS  = [0, 0, -5]; // <-- 热气球位置 [X, Y, Z]
+        const ReQiQiu1_ROT  = [0, 0, 0];  // <-- 热气球旋转 [X, Y, Z]（弧度）
+        let reQiQiu1Model = null;
+
+        gltfLoader.load(
+            'ReQiQiu1.glb',
+            (gltf) => {
+                console.log('✅ ReQiQiu1.glb 加载成功');
+                reQiQiu1Model = gltf.scene;
+                reQiQiu1Model.scale.setScalar(ReQiQiu1_SCALE);
+                reQiQiu1Model.position.set(...ReQiQiu1_POS);
+                reQiQiu1Model.rotation.set(...ReQiQiu1_ROT);
+                reQiQiu1Model.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
+                });
+                scene.add(reQiQiu1Model);
+            },
+            (progress) => {
+                if (progress.total > 0) {
+                    console.log('ReQiQiu1 加载: ' + (progress.loaded / progress.total * 100).toFixed(1) + '%');
+                }
+            },
+            (error) => {
+                console.warn('⚠️ ReQiQiu1.glb 未找到，跳过热气球模型');
             }
         );
 
@@ -1701,15 +1787,15 @@
             }
         }
 
+        // ==================== 移动范围限制 4×8 ====================
+        const BOUND_X = 2, BOUND_Z = 4; // X: ±2(宽4)  Z: ±4(深8)
+
         function handleMovement(dt) {
             let sx = rightInput.stickX, sy = rightInput.stickY;
             if (Math.abs(sx) < DEADZONE && Math.abs(sy) < DEADZONE) {
                 sx = leftInput.stickX; sy = leftInput.stickY;
             }
             if (Math.abs(sx) < DEADZONE && Math.abs(sy) < DEADZONE) {
-                // 摇杆回中，云海滚动逐渐减速
-                cloudScroll.x *= 0.92;
-                cloudScroll.y *= 0.92;
                 return;
             }
 
@@ -1718,11 +1804,15 @@
             const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
             right.y = 0; right.normalize();
 
-            // 摇杆控制云海滚动方向和速度（摇杆前推 = 云向身后流 = 向前飞的错觉）
-            const intensity = Math.max(Math.abs(sx), Math.abs(sy));
-            const scrollSpeed = 2.0 * intensity;
-            cloudScroll.x = (forward.x * sy + right.x * sx) * scrollSpeed;
-            cloudScroll.y = (forward.z * sy + right.z * sx) * scrollSpeed;
+            // 直接移动 dolly（真实移动，世界物体自然相对运动）
+            const speed = MOVE_SPEED * dt;
+            const dx = (forward.x * sy + right.x * sx) * speed;
+            const dz = (forward.z * sy + right.z * sx) * speed;
+            const nx = dolly.position.x + dx;
+            const nz = dolly.position.z + dz;
+
+            dolly.position.x = Math.max(-BOUND_X, Math.min(BOUND_X, nx));
+            dolly.position.z = Math.max(-BOUND_Z, Math.min(BOUND_Z, nz));
         }
 
         function handleExit() {
@@ -1743,20 +1833,7 @@
         const clock = new THREE.Clock();
         const tempPos = new THREE.Vector3();
 
-        function updateCloudLayers(dt) {
-            camera.getWorldPosition(tempPos);
-            cloudLayers.forEach((layer, idx) => {
-                // 云海平滑跟随相机，但允许有轻微的滞后感
-                layer.position.x += (tempPos.x - layer.position.x) * 0.05;
-                layer.position.z += (tempPos.z - layer.position.z) * 0.05;
-
-                const tex = layer.userData.texture;
-                // 摇杆控制纹理滚动：不同层速度不同形成视差
-                const parallax = idx === 0 ? 1.0 : 0.6;
-                tex.offset.x += cloudScroll.x * dt * parallax;
-                tex.offset.y += cloudScroll.y * dt * parallax;
-            });
-        }
+        function updateCloudLayers(dt) { /* 已废弃 — dolly 真实移动替代云海滚动 */ }
 
         let gameStarted = false;
         let leftHandGunEnabled = false; // 是否启用左手持枪模式
@@ -1785,11 +1862,9 @@
                     // 左手柄UI面板已屏蔽
                     // updateLeftDebugPanel();
                 }
-                updateCloudLayers(dt);
                 vrEntryEl.style.display = 'none';
                 vrHintsEl.style.display = 'none';
             } else {
-                updateCloudLayers(dt);
                 vrEntryEl.style.display = 'block';
                 vrHintsEl.style.display = 'flex';
             }
