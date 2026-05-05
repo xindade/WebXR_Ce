@@ -106,7 +106,7 @@
         <span class="hint-badge">🕹️ <span class="key">摇杆</span> 移动</span>
         <span class="hint-badge">🅰️ <span class="key">A键</span> 退出</span>
         <span class="hint-badge">🌤️ <span class="key">X/Y键</span> 切天空</span>
-        <span class="hint-badge">🖐️ <span class="key">左手握柄</span> 神掌</span>
+        <span class="hint-badge">🖐️ <span class="key">左手握柄</span> 神掌(两段)</span>
     </div>
     <div id="status-msg"></div>
     <div id="time-switch">
@@ -1796,10 +1796,11 @@
                     if (t >= 1) { ud.phase = 1; ud.slamStartY = palm.position.y; }
                 } else if (ud.phase === 1) {
                     const t = Math.min(1, (ud.elapsed - ud.phase0Duration) / ud.phase1Duration);
-                    palm.position.y = ud.slamStartY + (-0.5 - ud.slamStartY) * t;
+                    const groundY = dolly.position.y; // 地面 = dolly 高度
+                    palm.position.y = ud.slamStartY + (groundY - ud.slamStartY) * t;
                     if (t >= 1) {
                         ud.phase = 2;
-                        palm.position.y = -0.5;
+                        palm.position.y = groundY;
                         const pw = new THREE.Vector3(); palm.getWorldPosition(pw);
                         let killed = 0;
                         balloons.forEach(b => {
@@ -2133,6 +2134,7 @@
 
             // 天空过渡（VR/非VR 都持续更新）
             updateSkyTransition(dt);
+            updateBuddhaPalmSkills(dt);     // 神掌动画（非VR也要跑）
 
             if (renderer.xr.isPresenting) {
                 updateInputs();
@@ -2144,8 +2146,7 @@
                 checkLeftHandChoiceCardCollision();
                 handleExit();
                 checkVRSkySwitch();
-                checkBuddhaPalmTrigger();      // 左手握柄释放如来神掌
-                updateBuddhaPalmSkills(dt);     // 神掌下落动画
+                checkBuddhaPalmTrigger();      // 必须在 updateInputs 之后
                 // 调试面板每5帧更新一次
                 if (!animate._frameCount) animate._frameCount = 0;
                 animate._frameCount++;
