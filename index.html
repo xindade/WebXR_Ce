@@ -1500,7 +1500,7 @@
             return leftDebugPanel;
         }
 
-        function drawLeftDebugPanel(info) {
+        function drawLeftDebugPanel(info, countdown) {
             if (!leftDebugCtx) return;
             const c = leftDebugCtx;
             const w = leftDebugCanvas.width;
@@ -1515,6 +1515,31 @@
             c.lineWidth = 4;
             roundRect(c, 2, 2, w - 4, h - 4, 22);
             c.stroke();
+
+            // 瞄准倒计时模式：只显示超大数字，无其他文字
+            if (typeof countdown === 'number') {
+                const numStr = String(Math.max(0, Math.ceil(countdown)));
+                const fontSize = 180;
+                c.textAlign = 'center';
+                c.textBaseline = 'middle';
+
+                // 黑色描边，让数字在任意背景下都清晰
+                c.strokeStyle = '#000000';
+                c.lineWidth = 12;
+                c.font = `bold ${fontSize}px monospace`;
+                c.strokeText(numStr, w / 2, h / 2);
+
+                // 金色填充
+                c.fillStyle = '#ffd700';
+                c.fillText(numStr, w / 2, h / 2);
+
+                // 重置对齐
+                c.textAlign = 'start';
+                c.textBaseline = 'alphabetic';
+
+                if (leftDebugTexture) leftDebugTexture.needsUpdate = true;
+                return;
+            }
 
             c.fillStyle = '#00ccff';
             c.font = 'bold 28px monospace';
@@ -1533,12 +1558,16 @@
         function updateLeftDebugPanel() {
             if (!leftGrip || !leftDebugPanel) return;
 
+            // 瞄准中：直接显示超大倒计时数字，无其他文字
+            if (buddhaPalmState === 'AIMING') {
+                drawLeftDebugPanel('', buddhaPalmTimer);
+                return;
+            }
+
             const cdSec = Math.max(0, buddhaPalmCooldown).toFixed(1);
             const unlockStr = buddhaPalmReady ? '✅ 已解锁' : '🔒 未解锁';
             let aimStr = '';
-            if (buddhaPalmState === 'AIMING') {
-                aimStr = `🎯 瞄准中 ${Math.ceil(buddhaPalmTimer)}秒`;
-            } else if (buddhaPalmState === 'SLAMMING') {
+            if (buddhaPalmState === 'SLAMMING') {
                 aimStr = '🖐 神掌释放中!';
             } else if (buddhaPalmState === 'IDLE' && buddhaPalmCooldown > 0) {
                 aimStr = `⏳ 冷却 ${cdSec}秒`;
@@ -1616,8 +1645,8 @@
                                         1.0 = 原始大小
             --------------------------------------------------
         */
-        const SHIP_SCALE = 14.0;           // <-- 气球船缩放
-        const SHIP_POS  = [-0.8, -2.5, 0.05];     // <-- 气球船位置 [X, Y, Z]
+        const SHIP_SCALE = 7.0;           // <-- 气球船缩放
+        const SHIP_POS  = [1, 1, 0.05];     // <-- 气球船位置 [X, Y, Z]
         const SHIP_ROT  = [0, 1.57, 0];      // <-- 气球船旋转 [X, Y, Z]（弧度）
         let shipModel = null;
 
