@@ -172,19 +172,81 @@
 
         // ==================== 音效系统（Web Audio API） ====================
         let audioCtx = null;
-        let bgMusicNode = null;
+        let bgmBuffer = null;     // 预渲染的丛林鼓点循环缓冲
+        let bgmSource = null;     // 当前播放的BufferSourceNode
         let bgMusicGain = null;
+
+        // 预渲染丛林鼓点背景音（4秒循环）
+        async function renderJungleDrums() {
+            const SAMPLE_RATE = 44100;
+            const LOOP_DURATION = 4;
+            const offline = new OfflineAudioContext(2, SAMPLE_RATE * LOOP_DURATION, SAMPLE_RATE);
+
+            function scheduleNoise(ctx, time, duration, gain, filterType, freq) {
+                const sr = ctx.sampleRate;
+                const len = Math.floor(sr * (duration + 0.02));
+                const buf = ctx.createBuffer(1, len, sr);
+                const data = buf.getChannelData(0);
+                for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+                const src = ctx.createBufferSource();
+                src.buffer = buf;
+                const filter = ctx.createBiquadFilter();
+                filter.type = filterType;
+                filter.frequency.setValueAtTime(freq, time);
+                const gainNode = ctx.createGain();
+                gainNode.gain.setValueAtTime(gain, time);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, time + duration);
+                src.connect(filter);
+                filter.connect(gainNode);
+                gainNode.connect(ctx.destination);
+                src.start(time);
+                src.stop(time + duration + 0.02);
+            }
+
+            function scheduleNote(ctx, time, freq, duration, type, gain) {
+                const osc = ctx.createOscillator();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, time);
+                const gainNode = ctx.createGain();
+                gainNode.gain.setValueAtTime(0, time);
+                gainNode.gain.linearRampToValueAtTime(gain, time + 0.008);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, time + duration);
+                osc.connect(gainNode);
+                gainNode.connect(ctx.destination);
+                osc.start(time);
+                osc.stop(time + duration + 0.05);
+            }
+
+            // 鼓点
+            for (let i = 0; i < 16; i++) {
+                scheduleNoise(offline, i * 0.25, 0.06, 0.6, 'lowpass', 800);
+            }
+            // 木琴短音
+            const melody = [523, 587, 659, 698, 784, 880, 988, 1047];
+            melody.forEach((f, i) => {
+                scheduleNote(offline, i * 0.5, f, 0.1, 'sine', 0.4);
+            });
+
+            return offline.startRendering();
+        }
 
         function initAudio() {
             if (audioCtx) return;
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            startBackgroundMusic();
+            // 异步预渲染背景音乐，完成后自动播放
+            if (!bgmBuffer) {
+                renderJungleDrums().then(buf => {
+                    bgmBuffer = buf;
+                    startBackgroundMusic();
+                });
+            } else {
+                startBackgroundMusic();
+            }
         }
 
         // 射击音效 - 更真实的枪声
         function playShootSound() {
             if (!audioCtx) return;
-            // 使用噪声模拟枪声
             const bufferSize = audioCtx.sampleRate * 0.1;
             const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
             const data = buffer.getChannelData(0);
@@ -193,15 +255,12 @@
             }
             const noise = audioCtx.createBufferSource();
             noise.buffer = buffer;
-            
             const gain = audioCtx.createGain();
             gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
-            
             const filter = audioCtx.createBiquadFilter();
             filter.type = 'lowpass';
             filter.frequency.setValueAtTime(3000, audioCtx.currentTime);
-            
             noise.connect(filter);
             filter.connect(gain);
             gain.connect(audioCtx.destination);
@@ -209,84 +268,79 @@
             noise.stop(audioCtx.currentTime + 0.1);
         }
 
-        // 气球爆裂音效 - 更真实的爆裂声
+        // 气球爆裂音效 - 大气球爆炸声（低频爆裂+冲击）
         function playBalloonPopSound() {
             if (!audioCtx) return;
-            // 低频爆裂
-            const osc1 = audioCtx.createOscillator();
-            const gain1 = audioCtx.createGain();
-            osc1.type = 'sine';
-            osc1.frequency.setValueAtTime(150, audioCtx.currentTime);
-            osc1.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.2);
-            gain1.gain.setValueAtTime(0.4, audioCtx.currentTime);
-            gain1.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
-            osc1.connect(gain1);
-            gain1.connect(audioCtx.destination);
-            osc1.start();
-            osc1.stop(audioCtx.currentTime + 0.2);
-            
-            // 高频撕裂声
-            const osc2 = audioCtx.createOscillator();
-            const gain2 = audioCtx.createGain();
-            osc2.type = 'sawtooth';
-            osc2.frequency.setValueAtTime(2000, audioCtx.currentTime);
-            osc2.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.15);
-            gain2.gain.setValueAtTime(0.15, audioCtx.currentTime);
-            gain2.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
-            osc2.connect(gain2);
-            gain2.connect(audioCtx.destination);
-            osc2.start();
-            osc2.stop(audioCtx.currentTime + 0.15);
+            const now = audioCtx.currentTime;
+
+            // 主噪声（大气球低频爆裂）
+            const noiseDur = 0.25;
+            const sr = audioCtx.sampleRate;
+            const noiseLen = Math.floor(sr * noiseDur);
+            const noiseBuf = audioCtx.createBuffer(1, noiseLen, sr);
+            const nd = noiseBuf.getChannelData(0);
+            for (let i = 0; i < noiseLen; i++) nd[i] = Math.random() * 2 - 1;
+
+            const noiseSrc = audioCtx.createBufferSource();
+            noiseSrc.buffer = noiseBuf;
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(400, now);
+            filter.Q.setValueAtTime(0.5, now);
+            const gainNode = audioCtx.createGain();
+            gainNode.gain.setValueAtTime(1.4, now);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+            noiseSrc.connect(filter);
+            filter.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            noiseSrc.start(now);
+            noiseSrc.stop(now + noiseDur + 0.02);
+
+            // 低频冲击声（thump）
+            const thumpDur = 0.15;
+            const thumpLen = Math.floor(sr * thumpDur);
+            const thumpBuf = audioCtx.createBuffer(1, thumpLen, sr);
+            const td = thumpBuf.getChannelData(0);
+            const k = Math.log(0.2) / thumpDur; // 70Hz -> 14Hz
+            for (let i = 0; i < thumpLen; i++) {
+                const t = i / sr;
+                const freq = 70 * Math.exp(k * t);
+                const phase = 2 * Math.PI * (70 * (Math.exp(k * t) - 1) / k);
+                td[i] = Math.sin(phase) * 0.7;
+            }
+            const thumpSrc = audioCtx.createBufferSource();
+            thumpSrc.buffer = thumpBuf;
+            const thumpFilter = audioCtx.createBiquadFilter();
+            thumpFilter.type = 'lowpass';
+            thumpFilter.frequency.setValueAtTime(120, now);
+            const thumpGain = audioCtx.createGain();
+            thumpGain.gain.setValueAtTime(0.6, now);
+            thumpGain.gain.exponentialRampToValueAtTime(0.001, now + thumpDur);
+            thumpSrc.connect(thumpFilter);
+            thumpFilter.connect(thumpGain);
+            thumpGain.connect(audioCtx.destination);
+            thumpSrc.start(now);
+            thumpSrc.stop(now + thumpDur + 0.02);
         }
 
-        // 背景音乐 - 简单的循环旋律
+        // 背景音乐 - 丛林鼓点循环
         function startBackgroundMusic() {
-            if (!audioCtx || bgMusicNode) return;
-            
+            if (!audioCtx || !bgmBuffer || bgmSource) return;
             bgMusicGain = audioCtx.createGain();
-            bgMusicGain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+            bgMusicGain.gain.setValueAtTime(0.12, audioCtx.currentTime);
             bgMusicGain.connect(audioCtx.destination);
-            
-            // 简单的和弦进行
-            const chords = [
-                [261.63, 329.63, 392.00], // C major
-                [293.66, 369.99, 440.00], // D minor
-                [349.23, 440.00, 523.25], // F major
-                [392.00, 493.88, 587.33]  // G major
-            ];
-            
-            let chordIndex = 0;
-            
-            function playChord() {
-                if (!bgMusicGain) return;
-                
-                const chord = chords[chordIndex % chords.length];
-                chord.forEach(freq => {
-                    const osc = audioCtx.createOscillator();
-                    const gain = audioCtx.createGain();
-                    osc.type = 'sine';
-                    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-                    gain.gain.setValueAtTime(0.03, audioCtx.currentTime);
-                    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 2);
-                    osc.connect(gain);
-                    gain.connect(bgMusicGain);
-                    osc.start();
-                    osc.stop(audioCtx.currentTime + 2);
-                });
-                
-                chordIndex++;
-                if (bgMusicNode) {
-                    bgMusicNode = setTimeout(playChord, 2000);
-                }
-            }
-            
-            bgMusicNode = setTimeout(playChord, 500);
+            bgmSource = audioCtx.createBufferSource();
+            bgmSource.buffer = bgmBuffer;
+            bgmSource.loop = true;
+            bgmSource.connect(bgMusicGain);
+            bgmSource.start(0);
         }
 
         function stopBackgroundMusic() {
-            if (bgMusicNode) {
-                clearTimeout(bgMusicNode);
-                bgMusicNode = null;
+            if (bgmSource) {
+                try { bgmSource.stop(); } catch (e) {}
+                bgmSource.disconnect();
+                bgmSource = null;
             }
             if (bgMusicGain) {
                 bgMusicGain.gain.setValueAtTime(0, audioCtx.currentTime);
