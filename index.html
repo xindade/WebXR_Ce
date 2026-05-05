@@ -101,13 +101,7 @@
             <button id="enter-vr-left-hand" class="vr-btn vr-btn-alt">🔫 左手持枪模式</button>
         </div>
     </div>
-    <div id="vr-hints">
-        <span class="hint-badge">🔫 <span class="key">扳机</span> 射击</span>
-        <span class="hint-badge">🕹️ <span class="key">摇杆</span> 移动</span>
-        <span class="hint-badge">🅰️ <span class="key">A键</span> 退出</span>
-        <span class="hint-badge">🌤️ <span class="key">X/Y键</span> 切天空</span>
-        <span class="hint-badge">🖐️ <span class="key">左手握柄</span> 神掌(两段)</span>
-    </div>
+    <div id="vr-hints" style="display:none"></div>
     <div id="status-msg"></div>
     <div id="time-switch">
         <button id="btn-dusk" class="time-btn">🌅 黄昏</button>
@@ -336,7 +330,7 @@
         renderer.setClearColor(new THREE.Color(0x87CEEB));
 
         const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 200);
-        camera.position.set(0, 1.6, 0);
+        camera.position.set(0, 6.6, 0); // <-- 玩家眼高(米)，改这里调整身高
         const dolly = new THREE.Group();
         dolly.add(camera);
         scene.add(dolly);
@@ -1191,7 +1185,8 @@
             setTimeout(() => {
                 waveNumber++; // 每清完一波，波次+1
                 // 打完第二波（waveNumber==2）解锁如来神掌
-                if (waveNumber >= 2 && !buddhaPalmReady) {
+                // waveNumber>=2 即打完第2波解锁（第0波=初始，第1波=出骑士，第2波=解锁神掌）
+                if (waveNumber >= 1 && !buddhaPalmReady) {
                     buddhaPalmReady = true;
                     setTimeout(() => attachBuddhaPalmToLeft(), 500);
                     console.log('🖐️ 如来神掌已解锁！左手握柄侧键释放');
@@ -1538,14 +1533,22 @@
         function updateLeftDebugPanel() {
             if (!leftGrip || !leftDebugPanel) return;
 
-            const b = (pressed) => pressed ? '🟢' : '⚪';
+            const cdSec = Math.max(0, buddhaPalmCooldown).toFixed(1);
+            const unlockStr = buddhaPalmReady ? '✅ 已解锁' : '🔒 未解锁';
+            let aimStr = '';
+            if (buddhaPalmState === 'AIMING') {
+                aimStr = `🎯 瞄准中 ${Math.ceil(buddhaPalmTimer)}秒`;
+            } else if (buddhaPalmState === 'SLAMMING') {
+                aimStr = '🖐 神掌释放中!';
+            } else if (buddhaPalmState === 'IDLE' && buddhaPalmCooldown > 0) {
+                aimStr = `⏳ 冷却 ${cdSec}秒`;
+            } else if (buddhaPalmReady) {
+                aimStr = '🟢 握柄释放';
+            }
             const info = [
-                `左手 摇杆 ${leftInput.stickX.toFixed(2)},${leftInput.stickY.toFixed(2)}`,
-                `      扳机${b(leftBtnState.trigger)} 握柄${b(leftBtnState.grip)} 摇杆按下${b(leftBtnState.stickBtn)}`,
-                `      X键${b(leftBtnState.btnX)} Y键${b(leftBtnState.btnY)}`,
-                `右手 摇杆 ${rightInput.stickX.toFixed(2)},${rightInput.stickY.toFixed(2)}`,
-                `      扳机${b(rightBtnState.trigger)} 握柄${b(rightBtnState.grip)} 摇杆按下${b(rightBtnState.stickBtn)}`,
-                `      A键${b(rightBtnState.btnA)} B键${b(rightBtnState.btnB)}`
+                `🖐 如来神掌`,
+                `   ${unlockStr}`,
+                `   ${aimStr}`,
             ].join('\n');
 
             drawLeftDebugPanel(info);
@@ -1567,7 +1570,7 @@
         const gltfLoader = new GLTFLoader();
         gltfLoader.setDRACOLoader(dracoLoader);
         gltfLoader.load(
-            'Ak48.glb',
+            'Model/Ak48.glb',
             (gltf) => {
                 console.log('✅ Ak48.glb 加载成功');
                 ak48Model = gltf.scene;
@@ -1596,8 +1599,8 @@
             }
         );
 
-        // ==================== ReQiQiu1 热气球模型配置 ====================
-        /*  热气球参数速查表（修改下方数值即可调整）
+        // ==================== 气球船模型配置 ====================
+        /*  气球船参数速查表（修改下方数值即可调整）
             --------------------------------------------------
             模型位置(世界坐标):       position.set(0, 0, -5)
                                         X=0    左右（正=右，负=左）
@@ -1609,38 +1612,38 @@
                                         Y=0    偏航（绕Y轴）
                                         Z=0    翻滚（绕Z轴）
             --------------------------------------------------
-            模型缩放:                 ReQiQiu1_SCALE = 1.0
+            模型缩放:                 SHIP_SCALE = 1.0
                                         1.0 = 原始大小
             --------------------------------------------------
         */
-        const ReQiQiu1_SCALE = 8.0;       // <-- 热气球缩放
-        const ReQiQiu1_POS  = [0, 0, 0]; // <-- 热气球位置 [X, Y, Z]
-        const ReQiQiu1_ROT  = [0, 0, 0];  // <-- 热气球旋转 [X, Y, Z]（弧度）
-        let reQiQiu1Model = null;
+        const SHIP_SCALE = 14.0;           // <-- 气球船缩放
+        const SHIP_POS  = [-0.8, -2.5, 0.05];     // <-- 气球船位置 [X, Y, Z]
+        const SHIP_ROT  = [0, 1.57, 0];      // <-- 气球船旋转 [X, Y, Z]（弧度）
+        let shipModel = null;
 
         gltfLoader.load(
-            'ReQiQiu1.glb',
+            'Model/气球船.glb',
             (gltf) => {
-                console.log('✅ ReQiQiu1.glb 加载成功');
-                reQiQiu1Model = gltf.scene;
-                reQiQiu1Model.scale.setScalar(ReQiQiu1_SCALE);
-                reQiQiu1Model.position.set(...ReQiQiu1_POS);
-                reQiQiu1Model.rotation.set(...ReQiQiu1_ROT);
-                reQiQiu1Model.traverse((child) => {
+                console.log('✅ 气球船.glb 加载成功');
+                shipModel = gltf.scene;
+                shipModel.scale.setScalar(SHIP_SCALE);
+                shipModel.position.set(...SHIP_POS);
+                shipModel.rotation.set(...SHIP_ROT);
+                shipModel.traverse((child) => {
                     if (child.isMesh) {
                         child.castShadow = true;
                         child.receiveShadow = true;
                     }
                 });
-                scene.add(reQiQiu1Model);
+                scene.add(shipModel);
             },
             (progress) => {
                 if (progress.total > 0) {
-                    console.log('ReQiQiu1 加载: ' + (progress.loaded / progress.total * 100).toFixed(1) + '%');
+                    console.log('气球船 加载: ' + (progress.loaded / progress.total * 100).toFixed(1) + '%');
                 }
             },
             (error) => {
-                console.warn('⚠️ ReQiQiu1.glb 未找到，跳过热气球模型');
+                console.warn('⚠️ 气球船.glb 未找到，跳过气球船模型');
             }
         );
 
@@ -1656,19 +1659,42 @@
             () => console.warn('⚠️ 骑士模型未找到')
         );
 
-        // ==================== 如来神掌（第二波后左手柄获得）====================
+        // ==================== 如来神掌配置区 ====================
+        /*  神掌参数速查表（修改下方数值即可调整）
+            --------------------------------------------------
+            解锁关卡:                    打完第 2 波后解锁（搜索 waveNumber >= 2）
+            --------------------------------------------------
+            左手装备缩放:                 0.5（搜索 attachBuddhaPalmToLeft）
+            左手装备位置:                 position.set(0, -0.08, 0.05)
+                                            X=0      左右偏移（正=右）
+                                            Y=-0.08  上下偏移（正=上）
+                                            Z=0.05   前后偏移（正=后）
+            左手装备旋转:                 rotation.set(0, 0, 0) 弧度（搜索 palm.rotation）
+            --------------------------------------------------
+            预览神掌缩放:                 2.0（搜索 previewPalm.scale）
+            释放神掌缩放:                 20.0（搜索 palm.scale.setScalar）
+            释放神掌碰撞半径:             10（搜索 killRadius）
+            释放神掌伤害:                 1000（搜索 damage: 1000）
+            --------------------------------------------------
+            神掌出现前方距离:             5 米（搜索 addScaledVector）
+            神掌出现高度(头顶上方):       15 米（搜索 palm.position.y += 15）
+            神掌下落时间:                 1.0 秒（搜索 fallDuration）
+            神掌落地后消失延迟:           0.5 秒（搜索 cleanupDelay）
+            瞄准超时(自动释放):           5 秒（搜索 AIM_TIMEOUT）
+            技能冷却:                     8 秒（搜索 BUDDHA_COOLDOWN）
+            --------------------------------------------------
+        */
         let buddhaPalmModel = null;
         let buddhaPalmReady = false;
         let buddhaPalmAttached = false;
-        const BUDDHA_COOLDOWN = 8;
+        const BUDDHA_COOLDOWN = 8;       // <-- 技能冷却(秒)
         let buddhaPalmCooldown = 0;
         const buddhaPalmSkills = [];
 
         // 状态机: IDLE → AIMING → SLAMMING → IDLE(冷却)
         let buddhaPalmState = 'IDLE';
         let buddhaPalmTimer = 0;
-        const AIM_TIMEOUT = 5;
-        let aimCameraY = 1.6;
+        const AIM_TIMEOUT = 5;           // <-- 瞄准超时自动释放(秒)
         let promptSprite = null;
 
         function createPromptSprite() {
@@ -1705,22 +1731,41 @@
         function attachBuddhaPalmToLeft() {
             if (!buddhaPalmModel || !leftGrip || buddhaPalmAttached) return;
             const palm = buddhaPalmModel.clone();
-            palm.scale.setScalar(0.5);
-            palm.position.set(0, -0.08, 0.05);
+            palm.scale.setScalar(0.2);             // <-- 左手神掌大小
+            palm.position.set(0, -0.08, 0.03);    // <-- 左手神掌位置(X,Y,Z)
+            palm.rotation.set(-90, 0, 0);              // <-- 左手神掌旋转(X,Y,Z)弧度
             palm.traverse(c => { if (c.isMesh) c.castShadow = true; });
             palm.userData = { isBuddhaPalm: true };
             leftGrip.add(palm);
             buddhaPalmAttached = true;
             promptSprite = createPromptSprite();
-            promptSprite.position.set(0, 1.8, -2.5);
+            promptSprite.position.set(0, 1.8, -1.5); // <-- 提示文字位置(X,Y,Z)
             dolly.add(promptSprite);
             console.log('🖐️ 如来神掌已装备到左手');
         }
 
+        let previewPalm = null;
+        let aimDirection = new THREE.Vector3(); // 第一次按握柄时锁定的朝向
+
         function enterAimingMode() {
             buddhaPalmState = 'AIMING';
             buddhaPalmTimer = AIM_TIMEOUT;
-            aimCameraY = camera.position.y;
+            // 锁定当前玩家朝向
+            aimDirection.set(0, 0, -1).applyQuaternion(camera.quaternion);
+            aimDirection.y = 0; aimDirection.normalize();
+            // 前方生成预览神掌
+            if (buddhaPalmModel && !previewPalm) {
+                previewPalm = buddhaPalmModel.clone();
+                previewPalm.scale.setScalar(2.0);                 // <-- 预览神掌大小
+                previewPalm.rotation.set(-Math.PI / 2, 0, 0);
+                previewPalm.traverse(c => { if (c.isMesh) c.castShadow = true; });
+                previewPalm.userData = { isPreview: true };
+                dolly.add(previewPalm);
+            }
+            if (previewPalm) {
+                previewPalm.visible = true;
+                previewPalm.position.set(0, 0.5, -4);
+            }
             if (promptSprite) promptSprite.visible = true;
             console.log('🎯 瞄准：再按握柄释放，或' + AIM_TIMEOUT + '秒自动');
         }
@@ -1728,38 +1773,44 @@
         function releaseBuddhaPalm() {
             if (!buddhaPalmModel) return;
             if (promptSprite) promptSprite.visible = false;
+            if (previewPalm) { previewPalm.visible = false; }
             buddhaPalmState = 'SLAMMING';
             buddhaPalmCooldown = BUDDHA_COOLDOWN;
 
+            // 用第一次锁定的朝向生成 20x 神掌
             const palm = buddhaPalmModel.clone();
-            palm.scale.setScalar(1.0);
+            palm.scale.setScalar(20.0);             // <-- 释放神掌大小(20倍)
+            palm.rotation.set(-Math.PI / 2, 0, 0); // <-- 掌心朝下
+            palm.traverse(c => { if (c.isMesh) c.castShadow = true; });
             const camWorld = new THREE.Vector3();
             camera.getWorldPosition(camWorld);
-            const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-            fwd.y = 0; fwd.normalize();
-            palm.position.copy(camWorld).addScaledVector(fwd, 3);
-            palm.rotation.set(-Math.PI / 2, 0, 0);
-            palm.traverse(c => { if (c.isMesh) c.castShadow = true; });
+            palm.position.copy(camWorld).addScaledVector(aimDirection, 3); // <-- 前方5米
+            palm.position.y += 20;                   // <-- 头顶上方15米
             palm.userData = {
                 isBuddhaSkill: true,
-                phase: 0, elapsed: 0,
+                elapsed: 0,
                 startY: palm.position.y,
-                startScale: 1.0, endScale: 10.0,
-                phase0Duration: 2.0, phase1Duration: 0.5,
-                killRadius: 8, damage: 1000
+                targetY: camWorld.y,
+                fallDuration: 0.5,         // <-- 下落时间(秒)
+                killRadius: 10,            // <-- 碰撞半径(米)
+                damage: 1000               // <-- 伤害值
             };
             scene.add(palm);
             buddhaPalmSkills.push(palm);
-            console.log('🖐️ 如来神掌释放！');
+            console.log('🖐 如来神掌释放！20x从' + palm.position.y.toFixed(1) + 'm落下');
         }
 
         function updateBuddhaPalmSkills(dt) {
             if (buddhaPalmCooldown > 0) buddhaPalmCooldown -= dt;
 
+            // 瞄准倒计时（预览神掌跟随锁定方向）
             if (buddhaPalmState === 'AIMING') {
-                aimCameraY += (20.0 - aimCameraY) * Math.min(1, dt * 3);
-                camera.position.y = aimCameraY;
                 buddhaPalmTimer -= dt;
+                if (previewPalm && previewPalm.visible) {
+                    const offset = aimDirection.clone().multiplyScalar(4);
+                    offset.y = 0.5;
+                    previewPalm.position.copy(offset);
+                }
                 if (promptSprite && promptSprite.visible && buddhaPalmTimer > 0) {
                     const remain = Math.ceil(buddhaPalmTimer);
                     const cvs = promptSprite.material.map.source.data;
@@ -1770,7 +1821,7 @@
                         c.fillStyle = '#ffd700';
                         c.font = 'bold 36px "Microsoft YaHei", sans-serif';
                         c.textAlign = 'center';
-                        c.fillText('🖐️ 再按握柄释放如来神掌', 256, 55);
+                        c.fillText('🖐 再按握柄释放如来神掌', 256, 55);
                         c.fillStyle = '#aaa';
                         c.font = '24px "Microsoft YaHei", sans-serif';
                         c.fillText('或 ' + remain + ' 秒后自动释放', 256, 95);
@@ -1780,53 +1831,40 @@
                 if (buddhaPalmTimer <= 0) releaseBuddhaPalm();
             }
 
-            if (buddhaPalmState !== 'AIMING' && Math.abs(camera.position.y - 1.6) > 0.01) {
-                camera.position.y += (1.6 - camera.position.y) * Math.min(1, dt * 3);
-            }
-
+            // 神掌下落
             for (let i = buddhaPalmSkills.length - 1; i >= 0; i--) {
                 const palm = buddhaPalmSkills[i];
                 const ud = palm.userData;
                 ud.elapsed += dt;
 
-                if (ud.phase === 0) {
-                    const t = Math.min(1, ud.elapsed / ud.phase0Duration);
-                    palm.position.y = ud.startY - t * 10;
-                    palm.scale.setScalar(ud.startScale + (ud.endScale - ud.startScale) * t);
-                    if (t >= 1) { ud.phase = 1; ud.slamStartY = palm.position.y; }
-                } else if (ud.phase === 1) {
-                    const t = Math.min(1, (ud.elapsed - ud.phase0Duration) / ud.phase1Duration);
-                    const groundY = dolly.position.y; // 地面 = dolly 高度
-                    palm.position.y = ud.slamStartY + (groundY - ud.slamStartY) * t;
-                    if (t >= 1) {
-                        ud.phase = 2;
-                        palm.position.y = groundY;
-                        const pw = new THREE.Vector3(); palm.getWorldPosition(pw);
-                        let killed = 0;
-                        balloons.forEach(b => {
-                            if (!b.userData.active) return;
-                            if (b.position.distanceTo(pw) < ud.killRadius) {
-                                b.userData.hp -= ud.damage;
-                                if (b.userData.hp <= 0) {
-                                    b.userData.active = false;
-                                    if (b.userData.isKnight) {
-                                        b.traverse(c => { if (c.isMesh) c.visible = false; });
-                                        playerStats.score += KNIGHT_SCORE;
-                                    } else {
-                                        b.visible = false;
-                                        playerStats.score += BALLOON_SCORE;
-                                    }
-                                    killed++;
-                                }
+                const t = Math.min(1, ud.elapsed / ud.fallDuration);
+                palm.position.y = ud.startY + (ud.targetY - ud.startY) * t;
+
+                if (t >= 1 && !ud.landed) {
+                    ud.landed = true;
+                    palm.position.y = ud.targetY;
+                    const pw = new THREE.Vector3(); palm.getWorldPosition(pw);
+                    let killed = 0;
+                    balloons.forEach(b => {
+                        if (!b.userData.active) return;
+                        if (b.position.distanceTo(pw) < ud.killRadius) {
+                            b.userData.hp -= ud.damage;
+                            if (b.userData.hp <= 0) {
+                                b.userData.active = false;
+                                if (b.userData.isKnight) { b.traverse(c => { if (c.isMesh) c.visible = false; }); playerStats.score += KNIGHT_SCORE; }
+                                else { b.visible = false; playerStats.score += BALLOON_SCORE; }
+                                killed++;
                             }
-                        });
-                        console.log('🖐️ 神掌击杀 ' + killed + '（伤害1000）');
-                        spawnParticles(pw, 0xffdd44, 50);
-                        playBalloonPopSound();
-                        checkAllBalloonsDestroyed();
-                        ud.cleanupDelay = 0.3;
-                    }
-                } else if (ud.phase === 2) {
+                        }
+                    });
+                    console.log('🖐 神掌击杀 ' + killed + '（20x, 半径10, 伤害1000）');
+                    spawnParticles(pw, 0xffdd44, 80);
+                    playBalloonPopSound();
+                    checkAllBalloonsDestroyed();
+                    ud.cleanupDelay = 0.3; // <-- 落地后0.5秒消失
+                }
+
+                if (ud.cleanupDelay !== undefined) {
                     ud.cleanupDelay -= dt;
                     if (ud.cleanupDelay <= 0) {
                         palm.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
@@ -1863,9 +1901,8 @@
                 grip.add(panel);
             } else {
                 leftGrip = grip;
-                // 左手柄UI面板已屏蔽
-                // const leftPanel = createLeftDebugPanel();
-                // grip.add(leftPanel);
+                const leftPanel = createLeftDebugPanel();
+                grip.add(leftPanel);
             }
             
             if (idx === 0) leftController = controller;
@@ -2152,8 +2189,7 @@
                 animate._frameCount++;
                 if (animate._frameCount % 5 === 0) {
                     updateDebugPanel();
-                    // 左手柄UI面板已屏蔽
-                    // updateLeftDebugPanel();
+                    updateLeftDebugPanel();
                 }
                 vrEntryEl.style.display = 'none';
                 vrHintsEl.style.display = 'none';
