@@ -843,6 +843,20 @@
         const BULLET_DAMAGE = 30;          // <-- 子弹伤害
         const BALLOON_COLORS = [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff, 0xff88ff, 0x88ffff];
 
+        // 波次分阶段生成配置
+        const WAVE_BASE_SPAWN_COUNT = 30;   // 每波基础生成数量
+        const SPAWN_BATCH_INTERVAL = 1.0;   // 每1秒生成一批
+        const SPAWN_BATCH_SIZE = 3;         // 每批3个
+        const SPAWN_MAX_ACTIVE = 10;        // 场景内同时存在不超过10个
+        const SPAWN_DISTANCE = 15;          // 生成距离玩家（米）
+        const SPAWN_SPREAD = 8;             // 散布范围（米）
+
+        let waveSpawnRemaining = 0;         // 剩余待生成数
+        let waveSpawned = 0;                // 已生成数
+        let wavePhaseTimer = 0;             // 波次阶段计时器
+        let wavePhase = 0;                  // 1=前方, 2=加左右, 3=加后方
+        let spawnBatchTimer = 0;            // 批次生成计时器
+
         function createBalloon(x, y, z) {
             const geom = new THREE.SphereGeometry(BALLOON_RADIUS, 16, 16);
             const color = BALLOON_COLORS[Math.floor(Math.random() * BALLOON_COLORS.length)];
@@ -902,31 +916,78 @@
             balloons.forEach(b => disposeBalloon(b));
             balloons.length = 0;
 
-            // 计算骑士数量（第0波0个，第1波起1~3个）
-            const knightCount = (waveNumber >= 1)
-                ? Math.min(3, 1 + Math.floor(Math.random() * 3))
-                : 0;
-            const normalCount = BALLOON_COUNT - knightCount;
+            // 初始化波次分阶段生成状态
+            const totalSpawns = WAVE_BASE_SPAWN_COUNT + waveNumber * 5;
+            waveSpawnRemaining = totalSpawns;
+            waveSpawned = 0;
+            wavePhaseTimer = 0;
+            wavePhase = 1; // 第1阶段：只从前方生成
+            spawnBatchTimer = 0;
 
+            console.log(`🎈 第${waveNumber}波开始，目标生成 ${totalSpawns} 个气球`);
+        }
+
+        function spawnOneBalloon() {
             const playerPos = dolly.position.clone();
-            // 随机挑出骑士位置
-            const indices = Array.from({length: BALLOON_COUNT}, (_, i) => i);
-            for (let i = indices.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [indices[i], indices[j]] = [indices[j], indices[i]];
-            }
-            const knightIndices = new Set(indices.slice(0, knightCount));
+            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            forward.y = 0; forward.normalize();
+            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+            right.y = 0; right.normalize();
 
-            for (let i = 0; i < BALLOON_COUNT; i++) {
-                const angle = (Math.PI * 2 / BALLOON_COUNT) * i + Math.random() * 0.5;
-                const r = BALLOON_SPAWN_RADIUS + Math.random() * 3;
-                const x = playerPos.x + Math.cos(angle) * r;
-                const z = playerPos.z + Math.sin(angle) * r;
-                const y = 1.5 + Math.random() * 3;
-                if (knightIndices.has(i)) {
-                    createKnightBalloon(x, y, z);
-                } else {
-                    createBalloon(x, y, z);
+            let dirs = [];
+            // 前方始终有
+            dirs.push(playerPos.clone().add(forward.clone().multiplyScalar(SPAWN_DISTANCE)));
+
+            if (wavePhase >= 2) {
+                dirs.push(playerPos.clone().add(right.clone().multiplyScalar(SPAWN_DISTANCE)));  // 右
+                dirs.push(playerPos.clone().sub(right.clone().multiplyScalar(SPAWN_DISTANCE)));  // 左
+            }
+            if (wavePhase >= 3) {
+                dirs.push(playerPos.clone().sub(forward.clone().multiplyScalar(SPAWN_DISTANCE))); // 后方
+            }
+
+            const basePos = dirs[Math.floor(Math.random() * dirs.length)];
+            const x = basePos.x + (Math.random() - 0.5) * SPAWN_SPREAD;
+            const z = basePos.z + (Math.random() - 0.5) * SPAWN_SPREAD;
+            const y = 1.5 + Math.random() * 3;
+
+            // 骑士概率：第1波起约10%，随波次增加
+            const knightChance = (waveNumber >= 1) ? Math.min(0.35, 0.08 + waveNumber * 0.025) : 0;
+            const isKnight = Math.random() < knightChance;
+
+            if (isKnight) {
+                createKnightBalloon(x, y, z);
+            } else {
+                createBalloon(x, y, z);
+            }
+        }
+
+        function updateWaveSpawning(dt) {
+            if (waveSpawnRemaining <= 0) return;
+
+            wavePhaseTimer += dt;
+
+            // 阶段切换：15秒开启左右，30秒开启后方
+            if (wavePhase === 1 && wavePhaseTimer >= 15) {
+                wavePhase = 2;
+                console.log('🎈 左右方向开始生成气球');
+            } else if (wavePhase === 2 && wavePhaseTimer >= 30) {
+                wavePhase = 3;
+                console.log('🎈 后方也开始生成气球');
+            }
+
+            // 批次生成：每秒一批，每批3个
+            spawnBatchTimer += dt;
+            if (spawnBatchTimer >= SPAWN_BATCH_INTERVAL) {
+                spawnBatchTimer -= SPAWN_BATCH_INTERVAL;
+
+                const activeCount = balloons.filter(b => b.userData.active).length;
+                const canSpawn = Math.min(SPAWN_BATCH_SIZE, SPAWN_MAX_ACTIVE - activeCount, waveSpawnRemaining);
+
+                for (let i = 0; i < canSpawn; i++) {
+                    spawnOneBalloon();
+                    waveSpawnRemaining--;
+                    waveSpawned++;
                 }
             }
         }
@@ -1004,8 +1065,8 @@
 
         function checkAllBalloonsDestroyed() {
             const activeBalloons = balloons.filter(b => b.userData.active);
-            if (activeBalloons.length === 0 && !choiceCardsActive) {
-                // 所有气球都被打破，弹出选择卡
+            // 全部击破且本波次已生成完毕，才进入下一波
+            if (activeBalloons.length === 0 && waveSpawnRemaining <= 0 && !choiceCardsActive) {
                 spawnChoiceCards();
             }
         }
@@ -1457,12 +1518,15 @@
 
             const activeBalloons = balloons.filter(b => b.userData.active).length;
             const extraBulletStr = extraBulletEnabled ? '✅' : '❌';
+            const phaseNames = ['', '前', '前+左右', '全方向'];
+            const phaseStr = wavePhase > 0 ? `阶段${phaseNames[wavePhase]}` : '';
             const info = [
                 `❤️ 血量  ${playerStats.hp}`,
                 `🎯 得分  ${playerStats.score}`,
                 `⚔️ 攻击  ${playerStats.atk}`,
-                `🎈 气球  ${activeBalloons}/${BALLOON_COUNT}`,
-                `🔫 双弹  ${extraBulletStr}`
+                `🎈 气球  ${activeBalloons}/${SPAWN_MAX_ACTIVE} 剩${waveSpawnRemaining}`,
+                `🔫 双弹  ${extraBulletStr}`,
+                `🌊 波次${waveNumber} ${phaseStr}`
             ].join('\n');
 
             drawDebugPanel(info);
@@ -2191,6 +2255,7 @@
                 handleShooting();
                 updateBullets(dt);
                 updateBalloons(dt);
+                updateWaveSpawning(dt);
                 checkBulletBalloonCollisions();
                 checkLeftHandChoiceCardCollision();
                 handleExit();
