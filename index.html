@@ -1045,7 +1045,10 @@
                     shipHp -= BALLOON_DAMAGE;
                     shipHitFlash = 0.3; // 闪烁0.3秒
                     playBalloonPopSound();
-                    spawnParticles(b.position, 0xff4444, 15);
+                    // 碎片+粒子效果
+                    const debrisColor = b.userData.isKnight ? 0x888888 : (b.material.color ? b.material.color.getHex() : 0xff4444);
+                    spawnDebris(b.position.clone(), debrisColor, b.userData.isKnight ? 12 : 8);
+                    spawnParticles(b.position.clone(), 0xff4444, 15);
                     console.log(`💥 气球撞船！船HP: ${shipHp}/${SHIP_MAX_HP}`);
 
                     // 检查游戏结束
@@ -1088,6 +1091,10 @@
                             }
                             playerStats.score += balloon.userData.isKnight ? KNIGHT_SCORE : BALLOON_SCORE;
                             playBalloonPopSound();
+                            // 碎片效果
+                            const debrisColor = balloon.userData.isKnight ? 0x888888 : (balloon.material.color ? balloon.material.color.getHex() : 0xff4444);
+                            spawnDebris(balloon.position.clone(), debrisColor, balloon.userData.isKnight ? 12 : 8);
+                            spawnParticles(balloon.position.clone(), debrisColor, 20);
                         }
                         // 子弹销毁
                         bullet.userData.active = false;
@@ -1330,7 +1337,7 @@
         scene.add(particleGroup);
         const PARTICLE_COUNT = 50;
         const PARTICLE_LIFE = 1.0; // 粒子生命周期（秒）
-        
+
         // 粒子对象池
         const particlePool = [];
         function initParticlePool() {
@@ -1349,6 +1356,90 @@
             }
         }
         initParticlePool();
+
+        // ==================== 气球碎片系统（对象池） ====================
+        const DEBRIS_COUNT = 30;          // 最大碎片数
+        const DEBRIS_LIFE = 0.8;          // 碎片生命周期（秒）
+        const debrisGroup = new THREE.Group();
+        scene.add(debrisGroup);
+        const debrisPool = [];
+
+        function initDebrisPool() {
+            const geom = new THREE.TetrahedronGeometry(0.04, 0); // 四面体碎片
+            for (let i = 0; i < DEBRIS_COUNT; i++) {
+                const mat = new THREE.MeshBasicMaterial({
+                    color: 0xffffff,
+                    transparent: true,
+                    opacity: 1.0,
+                    side: THREE.DoubleSide
+                });
+                const mesh = new THREE.Mesh(geom, mat);
+                mesh.userData = {
+                    active: false,
+                    vel: new THREE.Vector3(),
+                    rotVel: new THREE.Vector3(),
+                    life: 0
+                };
+                mesh.visible = false;
+                debrisGroup.add(mesh);
+                debrisPool.push(mesh);
+            }
+        }
+        initDebrisPool();
+
+        // 生成气球碎片
+        function spawnDebris(position, color, count = 8) {
+            for (let i = 0; i < count; i++) {
+                const d = debrisPool.find(d => !d.userData.active);
+                if (!d) break;
+
+                d.position.copy(position);
+                // 随机爆炸方向（半球向上）
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 1.5 + Math.random() * 2.5;
+                const upBias = Math.random() * 1.5;
+                d.userData.vel.set(
+                    Math.cos(angle) * speed,
+                    upBias + Math.random() * 2,
+                    Math.sin(angle) * speed
+                );
+                // 随机旋转
+                d.userData.rotVel.set(
+                    (Math.random() - 0.5) * 10,
+                    (Math.random() - 0.5) * 10,
+                    (Math.random() - 0.5) * 10
+                );
+                d.userData.active = true;
+                d.userData.life = DEBRIS_LIFE;
+                d.material.color.setHex(color);
+                d.material.opacity = 1.0;
+                d.visible = true;
+            }
+        }
+
+        // 更新碎片
+        function updateDebris(dt) {
+            for (let i = 0; i < debrisPool.length; i++) {
+                const d = debrisPool[i];
+                if (!d.userData.active) continue;
+
+                // 物理更新
+                d.position.addScaledVector(d.userData.vel, dt);
+                d.userData.vel.y -= 4.0 * dt; // 重力
+                d.userData.vel.multiplyScalar(0.98); // 空气阻力
+                d.rotation.x += d.userData.rotVel.x * dt;
+                d.rotation.y += d.userData.rotVel.y * dt;
+                d.rotation.z += d.userData.rotVel.z * dt;
+
+                d.userData.life -= dt;
+                d.material.opacity = Math.max(0, d.userData.life / DEBRIS_LIFE);
+
+                if (d.userData.life <= 0 || d.position.y < -2) {
+                    d.userData.active = false;
+                    d.visible = false;
+                }
+            }
+        }
         
         function spawnParticles(position, color, count = 30) {
             for (let i = 0; i < count; i++) {
@@ -2299,20 +2390,52 @@
         let leftHandGunEnabled = false; // 是否启用左手持枪模式
         let gameOverState = false;   // 游戏结束状态
 
-        // 游戏结束处理
+        // 游戏结束处理 —— 死亡后重开当前关卡
         function gameOver() {
             if (gameOverState) return;
             gameOverState = true;
-            console.log('💀 气球船被摧毁！游戏结束');
+            console.log('💀 气球船被摧毁！即将重开当前关卡...');
 
             // 清除所有活跃气球
             balloons.forEach(b => {
                 b.userData.active = false;
                 b.visible = false;
+                if (b.userData.isKnight) {
+                    b.traverse(c => { if (c.isMesh) c.visible = false; });
+                }
             });
 
-            // 显示游戏结束提示（如果有需要可以在这里添加更多UI）
-            // 这里只是停止生成新气球，保留当前场景让玩家看到结果
+            // 1.5秒后重开当前关卡
+            setTimeout(() => {
+                restartLevel();
+            }, 1500);
+        }
+
+        // 重开当前关卡（保留波次，恢复船血，赠送抽卡）
+        function restartLevel() {
+            console.log('🔄 重开第' + waveNumber + '波，船血恢复满');
+
+            // 恢复船血
+            shipHp = SHIP_MAX_HP;
+            shipHitFlash = 0;
+            gameOverState = false;
+
+            // 清除所有气球
+            balloons.forEach(b => disposeBalloon(b));
+            balloons.length = 0;
+
+            // 重置波次生成状态
+            waveSpawnRemaining = 0;
+            waveSpawned = 0;
+            wavePhaseTimer = 0;
+            wavePhase = 0;
+            spawnBatchTimer = 0;
+
+            // 赠送一次抽卡
+            setTimeout(() => {
+                spawnChoiceCards();
+                console.log('🎁 死亡补偿：赠送一次抽卡机会');
+            }, 500);
         }
 
         function animate() {
@@ -2337,6 +2460,9 @@
                     checkVRSkySwitch();
                     checkBuddhaPalmTrigger();      // 必须在 updateInputs 之后
                 }
+                // 碎片和粒子始终更新（即使游戏结束也要播完）
+                updateDebris(dt);
+                updateParticles(dt);
                 // 调试面板每5帧更新一次（游戏结束也继续更新显示最终状态）
                 if (!animate._frameCount) animate._frameCount = 0;
                 animate._frameCount++;
