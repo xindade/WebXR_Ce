@@ -268,59 +268,23 @@
             noise.stop(audioCtx.currentTime + 0.1);
         }
 
-        // 气球爆裂音效 - 大气球爆炸声（低频爆裂+冲击）
+        // 气球爆裂音效 - 吃豆人得分风格（方波上行滑音）
         function playBalloonPopSound() {
             if (!audioCtx) return;
             const now = audioCtx.currentTime;
 
-            // 主噪声（大气球低频爆裂）
-            const noiseDur = 0.25;
-            const sr = audioCtx.sampleRate;
-            const noiseLen = Math.floor(sr * noiseDur);
-            const noiseBuf = audioCtx.createBuffer(1, noiseLen, sr);
-            const nd = noiseBuf.getChannelData(0);
-            for (let i = 0; i < noiseLen; i++) nd[i] = Math.random() * 2 - 1;
-
-            const noiseSrc = audioCtx.createBufferSource();
-            noiseSrc.buffer = noiseBuf;
-            const filter = audioCtx.createBiquadFilter();
-            filter.type = 'lowpass';
-            filter.frequency.setValueAtTime(400, now);
-            filter.Q.setValueAtTime(0.5, now);
-            const gainNode = audioCtx.createGain();
-            gainNode.gain.setValueAtTime(1.4, now);
-            gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
-            noiseSrc.connect(filter);
-            filter.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-            noiseSrc.start(now);
-            noiseSrc.stop(now + noiseDur + 0.02);
-
-            // 低频冲击声（thump）
-            const thumpDur = 0.15;
-            const thumpLen = Math.floor(sr * thumpDur);
-            const thumpBuf = audioCtx.createBuffer(1, thumpLen, sr);
-            const td = thumpBuf.getChannelData(0);
-            const k = Math.log(0.2) / thumpDur; // 70Hz -> 14Hz
-            for (let i = 0; i < thumpLen; i++) {
-                const t = i / sr;
-                const freq = 70 * Math.exp(k * t);
-                const phase = 2 * Math.PI * (70 * (Math.exp(k * t) - 1) / k);
-                td[i] = Math.sin(phase) * 0.7;
-            }
-            const thumpSrc = audioCtx.createBufferSource();
-            thumpSrc.buffer = thumpBuf;
-            const thumpFilter = audioCtx.createBiquadFilter();
-            thumpFilter.type = 'lowpass';
-            thumpFilter.frequency.setValueAtTime(120, now);
-            const thumpGain = audioCtx.createGain();
-            thumpGain.gain.setValueAtTime(0.6, now);
-            thumpGain.gain.exponentialRampToValueAtTime(0.001, now + thumpDur);
-            thumpSrc.connect(thumpFilter);
-            thumpFilter.connect(thumpGain);
-            thumpGain.connect(audioCtx.destination);
-            thumpSrc.start(now);
-            thumpSrc.stop(now + thumpDur + 0.02);
+            // 吃豆人得分：方波上行滑音 200 -> 800 Hz，0.3s
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(200, now);
+            osc.frequency.exponentialRampToValueAtTime(800, now + 0.3);
+            gain.gain.setValueAtTime(0.6, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start(now);
+            osc.stop(now + 0.3);
         }
 
         // 背景音乐 - 丛林鼓点循环
