@@ -1014,6 +1014,63 @@
             const playerPos = dolly.position.clone();
             playerPos.y += 1.6; // 对准玩家头部高度
 
+            // ---- 气球-气球排斥（防止重叠） ----
+            for (let i = 0; i < balloons.length; i++) {
+                const a = balloons[i];
+                if (!a.userData.active) continue;
+                for (let j = i + 1; j < balloons.length; j++) {
+                    const b = balloons[j];
+                    if (!b.userData.active) continue;
+
+                    const dx = a.position.x - b.position.x;
+                    const dz = a.position.z - b.position.z;
+                    const dy = a.position.y - b.position.y;
+                    const distSq = dx * dx + dy * dy + dz * dz;
+                    const minDist = a.userData.radius + b.userData.radius;
+
+                    if (distSq < minDist * minDist && distSq > 0.0001) {
+                        const dist = Math.sqrt(distSq);
+                        const overlap = minDist - dist;
+                        const pushX = (dx / dist) * overlap * BALLOON_REPEL_FORCE * dt;
+                        const pushY = (dy / dist) * overlap * BALLOON_REPEL_FORCE * dt * 0.3; // Y轴弱排斥
+                        const pushZ = (dz / dist) * overlap * BALLOON_REPEL_FORCE * dt;
+
+                        a.position.x += pushX;
+                        a.position.y += pushY;
+                        a.position.z += pushZ;
+                        b.position.x -= pushX;
+                        b.position.y -= pushY;
+                        b.position.z -= pushZ;
+                    }
+                }
+            }
+
+            // ---- 气球-船碰撞（简化球体碰撞） ----
+            const shipCenter = shipModel ? shipModel.position.clone() : new THREE.Vector3(0, 1, 0);
+            shipCenter.y += 1.0; // 船中心偏上
+
+            for (let i = 0; i < balloons.length; i++) {
+                const b = balloons[i];
+                if (!b.userData.active) continue;
+
+                const dx = b.position.x - shipCenter.x;
+                const dy = b.position.y - shipCenter.y;
+                const dz = b.position.z - shipCenter.z;
+                const distSq = dx * dx + dy * dy + dz * dz;
+                const minDist = b.userData.radius + SHIP_COLLISION_RADIUS;
+
+                if (distSq < minDist * minDist && distSq > 0.0001) {
+                    const dist = Math.sqrt(distSq);
+                    const overlap = minDist - dist;
+                    // 沿表面滑动：只推水平方向，保留Y轴移动
+                    const pushX = (dx / dist) * overlap * SHIP_REPEL_FORCE;
+                    const pushZ = (dz / dist) * overlap * SHIP_REPEL_FORCE;
+
+                    b.position.x += pushX;
+                    b.position.z += pushZ;
+                }
+            }
+
             for (let i = balloons.length - 1; i >= 0; i--) {
                 const b = balloons[i];
                 if (!b.userData.active) continue;
@@ -1567,6 +1624,11 @@
         let shipHp = SHIP_MAX_HP;
         const BALLOON_DAMAGE = 5;   // 每个气球对船的伤害
         let shipHitFlash = 0;       // 受伤闪烁计时
+
+        // -------------------- 碰撞系统配置 --------------------
+        const SHIP_COLLISION_RADIUS = 2.5;  // 船碰撞半径（简化球体）
+        const BALLOON_REPEL_FORCE = 3.0;    // 气球互斥强度
+        const SHIP_REPEL_FORCE = 2.0;       // 船排斥强度
 
         // -------------------- 左右手柄按键状态（左手UI显示） --------------------
         const leftBtnState = { trigger: false, grip: false, stickBtn: false, btnX: false, btnY: false };
