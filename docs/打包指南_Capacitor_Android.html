@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebXR VR 游戏 Capacitor Android 打包指南</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            line-height: 1.8;
+            color: #333;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        header {
+            background: linear-gradient(135deg, #e94560, #c23152);
+            color: #fff;
+            padding: 40px;
+            text-align: center;
+        }
+        header h1 {
+            font-size: 2.2em;
+            margin-bottom: 10px;
+        }
+        header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        .content {
+            padding: 40px;
+        }
+        h2 {
+            color: #e94560;
+            font-size: 1.5em;
+            margin: 30px 0 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #ffe4e9;
+        }
+        h2:first-child {
+            margin-top: 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+            font-size: 0.95em;
+        }
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+        th {
+            background: #fff5f7;
+            color: #c23152;
+            font-weight: 600;
+        }
+        tr:hover {
+            background: #fff5f7;
+        }
+        code {
+            background: #f5f5f5;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9em;
+            color: #c23152;
+        }
+        pre {
+            background: #1a1a2e;
+            color: #a8e6cf;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 15px 0;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9em;
+        }
+        pre code {
+            background: none;
+            color: inherit;
+            padding: 0;
+        }
+        .comment {
+            color: #888;
+        }
+        .highlight {
+            color: #ffd700;
+        }
+        .step {
+            background: linear-gradient(135deg, #fff5f7, #fff);
+            border-left: 4px solid #e94560;
+            padding: 15px 20px;
+            margin: 15px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .step-number {
+            display: inline-block;
+            background: #e94560;
+            color: #fff;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 28px;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .warning {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+        .warning strong {
+            color: #856404;
+        }
+        .file-path {
+            background: #e8f4f8;
+            padding: 8px 15px;
+            border-radius: 4px;
+            font-family: monospace;
+            margin: 10px 0;
+            border-left: 3px solid #0077b6;
+        }
+        .apk-size {
+            display: inline-block;
+            background: linear-gradient(135deg, #a8e6cf, #88d8b0);
+            color: #fff;
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        footer {
+            background: #f8f9fa;
+            padding: 20px 40px;
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📦 WebXR VR 游戏 Capacitor Android 打包指南</h1>
+            <p>将 Three.js WebXR VR 游戏打包为 Android APK</p>
+        </header>
+
+        <div class="content">
+            <h2>📋 环境要求</h2>
+            <table>
+                <tr>
+                    <th>工具</th>
+                    <th>版本要求</th>
+                    <th>说明</th>
+                </tr>
+                <tr>
+                    <td>Node.js</td>
+                    <td>18+</td>
+                    <td>npm 包管理器</td>
+                </tr>
+                <tr>
+                    <td>Java JDK</td>
+                    <td>17</td>
+                    <td>Capacitor 5.x 需要 JDK 17，8.x 需要 JDK 21</td>
+                </tr>
+                <tr>
+                    <td>Android SDK</td>
+                    <td>最新</td>
+                    <td>需配置 ANDROID_HOME</td>
+                </tr>
+                <tr>
+                    <td>Gradle</td>
+                    <td>8.x</td>
+                    <td>通过 wrapper 自动下载</td>
+                </tr>
+            </table>
+
+            <h2>🔧 打包步骤</h2>
+
+            <div class="step">
+                <span class="step-number">1</span>
+                <strong>初始化 Capacitor 项目</strong>
+            </div>
+            <pre><code>npm install @capacitor/core @capacitor/cli @capacitor/android
+npx cap init "WebXR热气球" "com.x.webxrce" --web-dir=web</code></pre>
+
+            <div class="step">
+                <span class="step-number">2</span>
+                <strong>添加 Android 平台</strong>
+            </div>
+            <pre><code>npx cap add android</code></pre>
+
+            <div class="step">
+                <span class="step-number">3</span>
+                <strong>配置 Android SDK 路径</strong>
+            </div>
+            <div class="file-path">android/local.properties</div>
+            <pre><code>sdk.dir=C:\\Users\\你的用户名\\AppData\\Local\\Android\\Sdk</code></pre>
+
+            <div class="step">
+                <span class="step-number">4</span>
+                <strong>配置 Maven 镜像（解决下载超时）</strong>
+            </div>
+            <div class="file-path">android/build.gradle</div>
+            <pre><code>buildscript {
+    repositories {
+        <span class="highlight">maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }</span>
+        google()
+        mavenCentral()
+    }
+}
+allprojects {
+    repositories {
+        <span class="highlight">maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }</span>
+        google()
+        mavenCentral()
+    }
+}</code></pre>
+
+            <div class="step">
+                <span class="step-number">5</span>
+                <strong>配置 Gradle 镜像（华为云加速）</strong>
+            </div>
+            <div class="file-path">android/gradle/wrapper/gradle-wrapper.properties</div>
+            <pre><code>distributionUrl=https\://repo.huaweicloud.com/gradle/gradle-8.14.3-all.zip
+networkTimeout=120000</code></pre>
+
+            <div class="step">
+                <span class="step-number">6</span>
+                <strong>构建 Web 并同步到 Android</strong>
+            </div>
+            <pre><code>npm run build          <span class="comment"># 构建 Web 项目</span>
+npx cap sync android   <span class="comment"># 同步到 Android</span></code></pre>
+
+            <div class="step">
+                <span class="step-number">7</span>
+                <strong>编译 APK</strong>
+            </div>
+            <pre><code>cd android
+<span class="highlight">JAVA_HOME="C:\Program Files\Java\jdk-17"</span> ./gradlew assembleDebug</code></pre>
+
+            <div class="step">
+                <span class="step-number">8</span>
+                <strong>获取 APK 文件</strong>
+            </div>
+            <div class="file-path">android/app/build/outputs/apk/debug/app-debug.apk</div>
+            <div class="apk-size">📱 打包结果约 9.6 MB</div>
+
+            <h2>⚠️ 常见问题</h2>
+            <table>
+                <tr>
+                    <th>问题</th>
+                    <th>原因</th>
+                    <th>解决方案</th>
+                </tr>
+                <tr>
+                    <td>Gradle 下载超时</td>
+                    <td>网络无法访问 services.gradle.org</td>
+                    <td>使用华为云镜像</td>
+                </tr>
+                <tr>
+                    <td>Google Maven 超时</td>
+                    <td>网络无法访问 dl.google.com</td>
+                    <td>添加阿里云 Maven 镜像</td>
+                </tr>
+                <tr>
+                    <td>Java 版本不兼容</td>
+                    <td>Capacitor 版本与 JDK 不匹配</td>
+                    <td>Capacitor 5.x 用 JDK 17，8.x 用 JDK 21</td>
+                </tr>
+                <tr>
+                    <td>Android SDK 路径错误</td>
+                    <td>local.properties 未配置或路径错误</td>
+                    <td>创建并正确配置 sdk.dir</td>
+                </tr>
+                <tr>
+                    <td>Gradle 解压失败</td>
+                    <td>缺少随机哈希目录名</td>
+                    <td>手动创建 ~/.gradle/wrapper/dists/ 目录</td>
+                </tr>
+            </table>
+
+            <div class="warning">
+                <strong>💡 提示：</strong>如果是首次构建，建议先确保网络畅通。阿里云和华为云镜像可以解决国内网络访问问题。
+            </div>
+
+            <h2>📁 项目结构参考</h2>
+            <pre><code>项目根目录/
+├── web/                    <span class="comment"># Web 资源目录（index.html, JS, CSS, 模型等）</span>
+├── android/                <span class="comment"># Android 项目</span>
+│   ├── app/
+│   │   └── src/main/
+│   │       ├── assets/    <span class="comment"># Web 资源会被复制到这里</span>
+│   │       └── java/      <span class="comment"># Java 源码</span>
+│   ├── build.gradle
+│   └── gradle/
+├── package.json
+└── capacitor.config.json</code></pre>
+        </div>
+
+        <footer>
+            <p>📦 文档生成于 2026-04-29 | 适用于 Capacitor 5.x + Android</p>
+        </footer>
+    </div>
+</body>
+</html>

@@ -40,7 +40,23 @@
 - `4c2e489` feat: add pico-vr-app (web assets + config files)
 
 ## 待办/问题记录
-- 无
+- 模块化后 PICO 4 测试：黑屏 + 退出失效（尚未修复）
+  - 已添加左侧全屏日志面板诊断，见 `2026-05-07.md`
+  - 排查方向：animate 循环是否运行、renderer.render 是否执行
+
+## 模块化架构（2026-05-06）
+- `index.html` — 入口 + VR 初始化 + 动画循环
+- `js/core.js` — 常量/STATE/Three.js 核心/灯光/天空/云朵/Group 容器
+- `js/game.js` — 子弹/气球/碰撞/波次/抽卡/如来神掌/特效
+- `js/vr.js` — 音效/模型加载/手柄/枪支/输入/UI 面板
+- 模块间全部使用命名导入，**禁用 `import * as` 语法**（PICO 4 兼容性问题）
+- 跨模块依赖通过运行时注入（`setAudio()` / `setVR()`）解决，避免循环依赖
+
+## 日志系统（2026-05-07）
+- 全局 `window.__log(msg, level)` 使用内存缓冲区，`index.html` 中用独立 `setInterval(200ms)` 刷新
+- 日志级别：`s`(✅绿色) `i`(🔹蓝色) `w`(⚠️黄色) `e`(❌红色)
+- 涵盖：模块加载、Three.js 初始化、模型加载、VR 会话、animate 心跳、错误捕获
+- 左侧 42vw × 100vh 面板，z-index:50，最新 200 条
 
 ---
-_最后更新: 2026-05-03_
+_最后更新: 2026-05-07_

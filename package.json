@@ -1,0 +1,26 @@
+{
+  "name": "webxr_ce",
+  "version": "1.0.0",
+  "description": "",
+  "main": "BufferGeometryUtils.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xindade/WebXR_Ce.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/xindade/WebXR_Ce/issues"
+  },
+  "homepage": "https://github.com/xindade/WebXR_Ce#readme",
+  "dependencies": {
+    "@capacitor/android": "^5.7.8",
+    "@capacitor/cli": "^5.7.8",
+    "@capacitor/core": "^5.7.8"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "appId": "com.x.webxrce",
+  "appName": "WebXR 热气球",
+  "webDir": "web",
+  "server": {
+    "hostname": "localhost"
+  },
+  "android": {
+    "backgroundColor": "#87CEEB",
+    "allowMixedContent": true,
+    "webContentsDebuggingEnabled": true
+  },
+  "plugins": {
+    "CapacitorCookies": {
+      "enabled": true
+    },
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "launchShowDuration": 0,
+      "backgroundColor": "#87CEEB",
+      "androidScaleType": "CENTER_CROP",
+      "showSpinner": false,
+      "splashFullScreen": true,
+      "splashImmersive": true
+    }
+  }
+}

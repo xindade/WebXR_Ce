@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>VR 热气球托盘场景 - Ak48压缩版</title>
+    <meta http-equiv="cache-control" content="no-cache, no-store, must-revalidate">
+    <title>VR 热气球托盘场景 - 模块化版</title>
     <style>
         :root { --bg: #1a1a2e; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -15,7 +16,7 @@
             -webkit-tap-highlight-color: transparent;
         }
         canvas { display: block; }
-        
+
         #vr-entry { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); z-index: 20; }
         #btn-container { display: flex; flex-direction: column; gap: 12px; align-items: center; }
         .vr-btn {
@@ -34,7 +35,7 @@
             box-shadow: 0 8px 30px rgba(33,150,243,0.5);
         }
         .vr-btn-alt:hover { background: linear-gradient(135deg, #42a5f5, #2196F3); }
-        
+
         #vr-hints {
             position: fixed; bottom: 130px; left: 50%; transform: translateX(-50%);
             z-index: 15; pointer-events: none; display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;
@@ -45,7 +46,7 @@
             letter-spacing: 1px; white-space: nowrap;
         }
         .hint-badge .key { font-weight: 700; color: #ffd700; }
-        
+
         #status-msg {
             position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
             z-index: 30; color: #fff; font-size: 18px; text-align: center;
@@ -53,7 +54,7 @@
             border-radius: 16px; display: none;
         }
         #status-msg.error { background: rgba(180,30,30,0.85); display: block; }
-        
+
         #loading {
             position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
             color: #fff; font-size: 20px; z-index: 100;
@@ -79,18 +80,39 @@
         }
         .time-btn:hover { background: rgba(255,255,255,0.2); border-color: #fff; }
         .time-btn.active { background: rgba(255,255,255,0.3); border-color: #ffd700; box-shadow: 0 0 16px rgba(255,215,0,0.5); }
-        .time-btn:nth-child(1) { border-left: 3px solid #ffaa00; } /* 黄昏 */
-        .time-btn:nth-child(2) { border-left: 3px solid #4da6ff; } /* 白天 */
-        .time-btn:nth-child(3) { border-left: 3px solid #8899ff; } /* 夜晚 */
+        .time-btn:nth-child(1) { border-left: 3px solid #ffaa00; }
+        .time-btn:nth-child(2) { border-left: 3px solid #4da6ff; }
+        .time-btn:nth-child(3) { border-left: 3px solid #8899ff; }
 
         #sky-hint {
             position: fixed; top: 80px; left: 50%; transform: translateX(-50%);
             z-index: 24; pointer-events: none;
             color: rgba(255,255,255,0.6); font-size: 12px; letter-spacing: 1px;
         }
+
+        /* ===== 日志面板 ===== */
+        #log-panel {
+            position: fixed; left: 0; top: 0; width: 42vw; height: 100vh;
+            z-index: 50; pointer-events: none;
+            background: rgba(0,0,0,0.88);
+            color: #00ff88; font: 11px/1.4 'Consolas', 'Courier New', monospace;
+            padding: 10px 12px; overflow-y: auto;
+            border-right: 1px solid rgba(0,255,136,0.15);
+            white-space: pre-wrap; word-break: break-all;
+        }
+        #log-panel::-webkit-scrollbar { width: 4px; }
+        #log-panel::-webkit-scrollbar-thumb { background: #00ff88; border-radius: 2px; }
+        .log-e { color: #ff4444; }
+        .log-w { color: #ffaa00; }
+        .log-s { color: #00ff88; }
+        .log-i { color: #88ccff; }
+        .log-time { color: #666; }
     </style>
 </head>
 <body>
+    <!-- JS 执行状态指示器（最优先显示） -->
+    <div id="js-status" style="position:fixed;top:4px;right:4px;z-index:9999;background:#000;color:#ff0;font:14px monospace;padding:4px 10px;border-radius:4px;">⏳ JS...</div>
+
     <div id="loading">
         <div id="loading-spinner"></div>
         <div>加载中...</div>
@@ -109,540 +131,35 @@
         <button id="btn-night" class="time-btn">🌙 夜晚</button>
     </div>
     <div id="sky-hint">VR中按左手 X/Y 键切换天空 · 30秒渐变过渡</div>
+    <div id="log-panel">⏳ 等待日志...
+如果长时间停留在此，说明 JS 未执行或 logger.js 加载失败。
+右上角应有一个 JS 状态指示器。
 
-    <!-- 本地文件，HTTP 服务器即可，PICO 浏览器无需访问任何外部网络 -->
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "./three.module.js",
-                "three/addons/": "./jsm/"
-            }
-        }
-    </script>
+    <!-- ===== 独立日志脚本（在 ES Module 之前加载） ===== -->
+    <script src="js/logger.js"></script>
 
     <script type="module">
-        import * as THREE from 'three';
-        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-        import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+        import * as THREE from './three.module.js';
+        import { renderer, scene, camera, choiceCardGroup, setShadow, updateSkyTransition, applySkyTarget, STATE } from './js/core.js';
+        import { GameAPI as game } from './js/game.js';
+        import { VrAPI as vr } from './js/vr.js';
 
-        // DOM 元素
+        // 将音频/VR模块注入游戏模块（避免循环依赖）
+        game.setAudio(vr);
+        game.setVR(vr);
+
+        window.__log('index.html 模块导入完成 / GameAPI+VrAPI 就绪', 's');
+
         const enterVRBtn = document.getElementById('enter-vr-btn');
         const enterVRLeftHandBtn = document.getElementById('enter-vr-left-hand');
         const statusMsgEl = document.getElementById('status-msg');
         const vrHintsEl = document.getElementById('vr-hints');
         const vrEntryEl = document.getElementById('vr-entry');
-        const loadingEl = document.getElementById('loading');
+        const logPanel = document.getElementById('log-panel');
 
-        // -------------------- 加载状态管理 --------------------
-        const loadingResources = { texture: false, model: false };
-        let loadingHidden = false;
-
-        function checkAllLoaded(msg) {
-            if (loadingHidden) return;
-            if (msg) {
-                loadingEl.innerHTML = '<div style="color:#ffaa00;">' + msg + '</div>';
-                setTimeout(() => { loadingEl.style.display = 'none'; loadingHidden = true; }, 1500);
-                return;
-            }
-            if (loadingResources.texture && loadingResources.model) {
-                loadingHidden = true;
-                loadingEl.style.display = 'none';
-            }
-        }
-
-        function onResourceError(msg) {
-            loadingEl.innerHTML = '<div style="color:#ffaa00;">' + msg + '</div>';
-            setTimeout(() => { loadingEl.style.display = 'none'; loadingHidden = true; }, 2000);
-        }
-
-        // 最长等待 15 秒后强制关闭
-        setTimeout(() => {
-            if (!loadingHidden) onResourceError('⚠️ 加载超时，检查 HTTP 服务器是否运行中...');
-        }, 15000);
-
-        // 摇杆和输入状态
-        const rightInput = { stickX: 0, stickY: 0 };
-        const leftInput = { stickX: 0, stickY: 0 };
-
-        
-
-        const MOVE_SPEED = 3.5;
-        const DEADZONE = 0.2;
-        const SHOOT_COOLDOWN = 150; // 射击冷却时间(ms)
-
-        // ==================== 音效系统（Web Audio API） ====================
-        let audioCtx = null;
-        let bgmBuffer = null;     // 预渲染的丛林鼓点循环缓冲
-        let bgmSource = null;     // 当前播放的BufferSourceNode
-        let bgMusicGain = null;
-
-        // 预渲染丛林鼓点背景音（4秒循环）
-        async function renderJungleDrums() {
-            const SAMPLE_RATE = 44100;
-            const LOOP_DURATION = 4;
-            const offline = new OfflineAudioContext(2, SAMPLE_RATE * LOOP_DURATION, SAMPLE_RATE);
-
-            function scheduleNoise(ctx, time, duration, gain, filterType, freq) {
-                const sr = ctx.sampleRate;
-                const len = Math.floor(sr * (duration + 0.02));
-                const buf = ctx.createBuffer(1, len, sr);
-                const data = buf.getChannelData(0);
-                for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
-                const src = ctx.createBufferSource();
-                src.buffer = buf;
-                const filter = ctx.createBiquadFilter();
-                filter.type = filterType;
-                filter.frequency.setValueAtTime(freq, time);
-                const gainNode = ctx.createGain();
-                gainNode.gain.setValueAtTime(gain, time);
-                gainNode.gain.exponentialRampToValueAtTime(0.001, time + duration);
-                src.connect(filter);
-                filter.connect(gainNode);
-                gainNode.connect(ctx.destination);
-                src.start(time);
-                src.stop(time + duration + 0.02);
-            }
-
-            function scheduleNote(ctx, time, freq, duration, type, gain) {
-                const osc = ctx.createOscillator();
-                osc.type = type;
-                osc.frequency.setValueAtTime(freq, time);
-                const gainNode = ctx.createGain();
-                gainNode.gain.setValueAtTime(0, time);
-                gainNode.gain.linearRampToValueAtTime(gain, time + 0.008);
-                gainNode.gain.exponentialRampToValueAtTime(0.001, time + duration);
-                osc.connect(gainNode);
-                gainNode.connect(ctx.destination);
-                osc.start(time);
-                osc.stop(time + duration + 0.05);
-            }
-
-            // 鼓点
-            for (let i = 0; i < 16; i++) {
-                scheduleNoise(offline, i * 0.25, 0.06, 0.6, 'lowpass', 800);
-            }
-            // 木琴短音
-            const melody = [523, 587, 659, 698, 784, 880, 988, 1047];
-            melody.forEach((f, i) => {
-                scheduleNote(offline, i * 0.5, f, 0.1, 'sine', 0.4);
-            });
-
-            return offline.startRendering();
-        }
-
-        function initAudio() {
-            if (audioCtx) return;
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            // 异步预渲染背景音乐，完成后自动播放
-            if (!bgmBuffer) {
-                renderJungleDrums().then(buf => {
-                    bgmBuffer = buf;
-                    startBackgroundMusic();
-                });
-            } else {
-                startBackgroundMusic();
-            }
-        }
-
-        // 射击音效 - 更真实的枪声
-        function playShootSound() {
-            if (!audioCtx) return;
-            const bufferSize = audioCtx.sampleRate * 0.1;
-            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-            const data = buffer.getChannelData(0);
-            for (let i = 0; i < bufferSize; i++) {
-                data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.1));
-            }
-            const noise = audioCtx.createBufferSource();
-            noise.buffer = buffer;
-            const gain = audioCtx.createGain();
-            gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
-            const filter = audioCtx.createBiquadFilter();
-            filter.type = 'lowpass';
-            filter.frequency.setValueAtTime(3000, audioCtx.currentTime);
-            noise.connect(filter);
-            filter.connect(gain);
-            gain.connect(audioCtx.destination);
-            noise.start();
-            noise.stop(audioCtx.currentTime + 0.1);
-        }
-
-        // 气球爆裂音效 - 吃豆人得分风格（方波上行滑音）
-        function playBalloonPopSound() {
-            if (!audioCtx) return;
-            const now = audioCtx.currentTime;
-
-            // 吃豆人得分：方波上行滑音 200 -> 800 Hz，0.3s
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.type = 'square';
-            osc.frequency.setValueAtTime(200, now);
-            osc.frequency.exponentialRampToValueAtTime(800, now + 0.3);
-            gain.gain.setValueAtTime(0.6, now);
-            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-            osc.start(now);
-            osc.stop(now + 0.3);
-        }
-
-        // 背景音乐 - 丛林鼓点循环
-        function startBackgroundMusic() {
-            if (!audioCtx || !bgmBuffer || bgmSource) return;
-            bgMusicGain = audioCtx.createGain();
-            bgMusicGain.gain.setValueAtTime(0.12, audioCtx.currentTime);
-            bgMusicGain.connect(audioCtx.destination);
-            bgmSource = audioCtx.createBufferSource();
-            bgmSource.buffer = bgmBuffer;
-            bgmSource.loop = true;
-            bgmSource.connect(bgMusicGain);
-            bgmSource.start(0);
-        }
-
-        function stopBackgroundMusic() {
-            if (bgmSource) {
-                try { bgmSource.stop(); } catch (e) {}
-                bgmSource.disconnect();
-                bgmSource = null;
-            }
-            if (bgMusicGain) {
-                bgMusicGain.gain.setValueAtTime(0, audioCtx.currentTime);
-                bgMusicGain = null;
-            }
-        }
-
-        // Three.js 核心
-        const renderer = new THREE.WebGLRenderer({ antialias: false }); // VR头显自带反锯齿，关闭省GPU
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.0)); // 限制1.0，移动端降采样
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.shadowMap.enabled = true;
-
-        // VR 模式下关闭阴影（移动 GPU 瓶颈优化）
-        function setShadow(enabled) {
-            renderer.shadowMap.enabled = enabled;
-            sunLight.castShadow = enabled;
-            if (!enabled) {
-                // VR 时直接关闭所有阴影投射，避免额外的深度图 pass
-                scene.traverse(obj => {
-                    if (obj.isMesh) obj.castShadow = false;
-                });
-            } else {
-                // 恢复
-                sunLight.castShadow = true;
-                scene.traverse(obj => {
-                    if (obj.isMesh && (obj === ak48Model || obj.parent === ak48Model)) {
-                        // 不处理
-                    }
-                });
-            }
-        }
-        renderer.outputColorSpace = THREE.SRGBColorSpace;
-        renderer.toneMapping = THREE.NoToneMapping; // 关闭色调映射，ACES最影响移动GPU
-        renderer.xr.enabled = true;
         document.body.appendChild(renderer.domElement);
 
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x87CEEB);
-        scene.fog = new THREE.Fog(0x87CEEB, 30, 100);
-        renderer.setClearColor(new THREE.Color(0x87CEEB));
-
-        const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 200);
-        camera.position.set(0, 6.6, 0); // <-- 玩家眼高(米)，改这里调整身高
-        const dolly = new THREE.Group();
-        dolly.add(camera);
-        scene.add(dolly);
-
-        // ==================== 日夜黄昏天空系统 ====================
-        // 天空穹顶（可动态变色）
-        const skyDomeGeo = new THREE.SphereGeometry(60, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-        const skyDomeMat = new THREE.MeshBasicMaterial({
-            color: 0x87CEEB, side: THREE.BackSide, depthWrite: false
-        });
-        const skyDome = new THREE.Mesh(skyDomeGeo, skyDomeMat);
-        skyDome.position.y = 1.6;
-        dolly.add(skyDome);
-
-        // 星空粒子（夜晚可见，三层叠加制造闪烁感）
-        // 圆形光点纹理（消除方片）
-        function createGlowTexture(innerColor, outerColor, size) {
-            const canvas = document.createElement('canvas');
-            canvas.width = size; canvas.height = size;
-            const ctx = canvas.getContext('2d');
-            const g = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
-            g.addColorStop(0, innerColor);
-            g.addColorStop(0.15, innerColor);
-            g.addColorStop(0.5, outerColor);
-            g.addColorStop(1, 'rgba(255,255,255,0)');
-            ctx.fillStyle = g; ctx.fillRect(0, 0, size, size);
-            return new THREE.CanvasTexture(canvas);
-        }
-        const starTex = createGlowTexture('white', 'rgba(180,200,255,0.6)', 64);
-        const starLayers = [];
-        for (let layer = 0; layer < 3; layer++) {
-            const starGeo = new THREE.BufferGeometry();
-            const count = 80 + layer * 50; // 80 + 130 + 180 = 390 颗
-            const positions = new Float32Array(count * 3);
-            const twinkleData = new Float32Array(count * 2);
-            for (let i = 0; i < count; i++) {
-                const theta = Math.random() * Math.PI * 2;
-                // 幂函数分布：头顶最密，地平线附近稀疏（模拟真实星空）
-                const phi = Math.pow(Math.random(), 2.5) * Math.PI * 0.48;
-                const r = 48 + Math.random() * 4 + layer * 1.5;
-                positions[i * 3] = Math.sin(phi) * Math.cos(theta) * r;
-                positions[i * 3 + 1] = Math.cos(phi) * r + 1.6;
-                positions[i * 3 + 2] = Math.sin(phi) * Math.sin(theta) * r;
-                twinkleData[i * 2] = Math.random() * Math.PI * 2;
-                twinkleData[i * 2 + 1] = 0.3 + Math.random() * 1.5;
-            }
-            starGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            const starMat = new THREE.PointsMaterial({
-                map: starTex,
-                color: 0xffffff,
-                size: 0.35 + layer * 0.1,
-                transparent: true,
-                opacity: 0,
-                depthWrite: false,
-                blending: THREE.AdditiveBlending
-            });
-            const starField = new THREE.Points(starGeo, starMat);
-            starField.userData = { twinkle: twinkleData, baseOpacity: 0 };
-            dolly.add(starField);
-            starLayers.push(starField);
-        }
-
-        // ── 太阳/月亮精灵（优先加载 sun.png / moon.png，失败则 Canvas 自动生成）──
-        // 图片要求：PNG 格式、透明背景、建议 512×512，放到 index.html 同级目录
-        function loadSpriteImage(path, spriteMat) {
-            const img = new Image();
-            img.onload = () => {
-                const tex = new THREE.CanvasTexture(img);
-                tex.colorSpace = THREE.SRGBColorSpace;
-                spriteMat.map?.dispose();
-                spriteMat.map = tex;
-                spriteMat.needsUpdate = true;
-                console.log('✅ 已加载:', path);
-            };
-            img.src = path; // 404 静默忽略
-        }
-
-        // ── 太阳 Canvas 纹理 ──
-        const sunCanvas = document.createElement('canvas');
-        sunCanvas.width = 512; sunCanvas.height = 512;
-        (() => {
-            const c = sunCanvas.getContext('2d'), cx = 256, cy = 256;
-            const g = c.createRadialGradient(cx, cy, 30, cx, cy, 250);
-            g.addColorStop(0, 'rgba(255,255,220,1)');
-            g.addColorStop(0.08, 'rgba(255,255,200,1)');
-            g.addColorStop(0.25, 'rgba(255,200,80,0.8)');
-            g.addColorStop(0.5, 'rgba(255,140,30,0.25)');
-            g.addColorStop(1, 'rgba(255,80,10,0)');
-            c.fillStyle = g; c.fillRect(0, 0, 512, 512);
-        })();
-        const sunTex = new THREE.CanvasTexture(sunCanvas);
-        sunTex.colorSpace = THREE.SRGBColorSpace;
-        const sunSpriteMat = new THREE.SpriteMaterial({
-            map: sunTex, color: 0xffffff,
-            transparent: true, depthWrite: false, blending: THREE.NormalBlending, opacity: 1
-        });
-        const sunSprite = new THREE.Sprite(sunSpriteMat);
-        sunSprite.scale.set(8, 8, 1);
-        dolly.add(sunSprite);
-
-        // ── 月牙 Canvas 纹理（纯路径，无 composite 黑边）──
-        const moonCanvas = document.createElement('canvas');
-        moonCanvas.width = 512; moonCanvas.height = 512;
-        (() => {
-            const c = moonCanvas.getContext('2d'), cx = 256, cy = 256, R = 200;
-            // 柔光
-            const g = c.createRadialGradient(cx, cy, R * 0.12, cx, cy, R * 0.7);
-            g.addColorStop(0, 'rgba(200,220,255,0.5)');
-            g.addColorStop(0.5, 'rgba(140,170,220,0.1)');
-            g.addColorStop(1, 'rgba(255,255,255,0)');
-            c.fillStyle = g; c.fillRect(0, 0, 512, 512);
-            // 月牙：外弧 + 反向内弧
-            const cutX = cx + R * 0.35, cutY = cy - R * 0.08, cutR = R * 0.82;
-            const a1 = -Math.PI * 0.42, a2 = Math.PI * 0.42;
-            c.fillStyle = 'rgba(232,240,255,0.92)';
-            c.beginPath();
-            c.arc(cx, cy, R, a1, a2);
-            c.arc(cutX, cutY, cutR, a2, a1, true);
-            c.closePath();
-            c.fill();
-        })();
-        const moonTex = new THREE.CanvasTexture(moonCanvas);
-        moonTex.colorSpace = THREE.SRGBColorSpace;
-        const moonSpriteMat = new THREE.SpriteMaterial({
-            map: moonTex, color: 0xffffff,
-            transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0
-        });
-        const moonSprite = new THREE.Sprite(moonSpriteMat);
-        moonSprite.scale.set(5, 5, 1);
-        dolly.add(moonSprite);
-
-        // 加载 image 目录中的太阳/月亮/气球贴图
-        loadSpriteImage('image/sun.png', sunSpriteMat);
-        loadSpriteImage('image/moon.png', moonSpriteMat);
-
-        // 气球笑脸贴图
-        const balloonTex = new THREE.Texture();
-        const balloonImg = new Image();
-        balloonImg.onload = () => {
-            balloonTex.image = balloonImg;
-            balloonTex.colorSpace = THREE.SRGBColorSpace;
-            balloonTex.needsUpdate = true;
-            console.log('✅ 气球贴图加载成功: image/smile.png');
-        };
-        balloonImg.src = 'image/smile.png';
-
-        // 太阳光（方向光）
-        const sunLight = new THREE.DirectionalLight(0xffffff, 2.5);
-        sunLight.position.set(20, 40, 10);
-        sunLight.castShadow = true;
-        sunLight.shadow.mapSize.width = 2048;
-        sunLight.shadow.mapSize.height = 2048;
-        sunLight.shadow.camera.near = 0.5;
-        sunLight.shadow.camera.far = 100;
-        sunLight.shadow.camera.left = -30;
-        sunLight.shadow.camera.right = 30;
-        sunLight.shadow.camera.top = 30;
-        sunLight.shadow.camera.bottom = -30;
-        scene.add(sunLight);
-
-        // 环境光 & 半球光（保存引用以便动态更新）
-        const ambientLight = new THREE.AmbientLight(0xffeedd, 1.2);
-        scene.add(ambientLight);
-        const hemiLight = new THREE.HemisphereLight(0x87CEEB, 0x90EE90, 0.8);
-        scene.add(hemiLight);
-
-        // ── 天空预设：白天 / 黄昏 / 夜晚 ──
-        const DAY_SUN_AZ = Math.atan2(20, 10); // 正午太阳方位 ≈ 1.107 rad
-        const skyPresets = {
-            day: {
-                bg: 0x87CEEB, fog: 0x87CEEB, fogNear: 30, fogFar: 100,
-                skyDome: 0x87CEEB, ambient: 0xffeedd, ambientI: 1.2,
-                sun: 0xfffef5, sunI: 2.5, sunX: 20, sunY: 40, sunZ: 10,
-                hemiSky: 0x87CEEB, hemiGround: 0x90EE90, hemiI: 0.8,
-                stars: 0,
-                sunElev: 50, moonElev: -30, moonAz: DAY_SUN_AZ
-            },
-            dusk: {
-                bg: 0xe85d26, fog: 0xe87544, fogNear: 20, fogFar: 80,
-                skyDome: 0xe86830, ambient: 0xffccaa, ambientI: 0.7,
-                sun: 0xff9955, sunI: 1.8, sunX: 30, sunY: 8, sunZ: 5,
-                hemiSky: 0xff5511, hemiGround: 0x553322, hemiI: 0.5,
-                stars: 0.25,
-                sunElev: 5, moonElev: 5, moonAz: Math.atan2(30, 5) + Math.PI
-            },
-            night: {
-                bg: 0x0a0a28, fog: 0x0c0c2a, fogNear: 15, fogFar: 60,
-                skyDome: 0x0e0e30, ambient: 0x1a2a55, ambientI: 0.35,
-                sun: 0x8899cc, sunI: 0.5, sunX: -10, sunY: 45, sunZ: -15,
-                hemiSky: 0x0a0a3a, hemiGround: 0x0f0f1a, hemiI: 0.2,
-                stars: 1.0,
-                sunElev: -25, moonElev: 50, moonAz: DAY_SUN_AZ  // 月亮在正午太阳位
-            }
-        };
-
-        // 当前天空状态（会被 lerp 到目标预设）
-        const skyNow = {
-            bg: new THREE.Color(skyPresets.day.bg),
-            fog: new THREE.Color(skyPresets.day.fog),
-            fogNear: 30, fogFar: 100,
-            skyDome: new THREE.Color(skyPresets.day.skyDome),
-            ambient: new THREE.Color(skyPresets.day.ambient),
-            ambientI: skyPresets.day.ambientI,
-            sun: new THREE.Color(skyPresets.day.sun),
-            sunI: skyPresets.day.sunI,
-            sunX: 20, sunY: 40, sunZ: 10,
-            hemiSky: new THREE.Color(skyPresets.day.hemiSky),
-            hemiGround: new THREE.Color(skyPresets.day.hemiGround),
-            hemiI: skyPresets.day.hemiI,
-            stars: 0,
-            sunElev: 50, moonElev: -30, moonAz: DAY_SUN_AZ
-        };
-        let skyTarget = 'day';
-
-        function applySkyTarget(name) {
-            skyTarget = name; // 仅设置目标，过渡由 updateSkyTransition 完成
-        }
-
-        function updateSkyTransition(dt) {
-            const p = skyPresets[skyTarget];
-            const ease = 1 - Math.exp(-0.12 * dt); // ~30秒完成95%过渡
-
-            skyNow.bg.lerp(new THREE.Color(p.bg), ease);
-            skyNow.fog.lerp(new THREE.Color(p.fog), ease);
-            skyNow.skyDome.lerp(new THREE.Color(p.skyDome), ease);
-            skyNow.ambient.lerp(new THREE.Color(p.ambient), ease);
-            skyNow.sun.lerp(new THREE.Color(p.sun), ease);
-            skyNow.hemiSky.lerp(new THREE.Color(p.hemiSky), ease);
-            skyNow.hemiGround.lerp(new THREE.Color(p.hemiGround), ease);
-
-            skyNow.ambientI += (p.ambientI - skyNow.ambientI) * ease;
-            skyNow.sunI    += (p.sunI    - skyNow.sunI)    * ease;
-            skyNow.hemiI   += (p.hemiI   - skyNow.hemiI)   * ease;
-            skyNow.sunX    += (p.sunX    - skyNow.sunX)    * ease;
-            skyNow.sunY    += (p.sunY    - skyNow.sunY)    * ease;
-            skyNow.sunZ    += (p.sunZ    - skyNow.sunZ)    * ease;
-            skyNow.fogNear += (p.fogNear - skyNow.fogNear) * ease;
-            skyNow.fogFar  += (p.fogFar  - skyNow.fogFar)  * ease;
-            skyNow.stars   += (p.stars   - skyNow.stars)   * ease;
-            skyNow.sunElev += (p.sunElev - skyNow.sunElev) * ease;
-            skyNow.moonElev += (p.moonElev - skyNow.moonElev) * ease;
-            skyNow.moonAz  += (p.moonAz  - skyNow.moonAz)  * ease;
-
-            // 应用到场景
-            scene.background.copy(skyNow.bg);
-            scene.fog.color.copy(skyNow.fog);
-            scene.fog.near = skyNow.fogNear;
-            scene.fog.far  = skyNow.fogFar;
-            renderer.setClearColor(skyNow.bg);
-            skyDomeMat.color.copy(skyNow.skyDome);
-            ambientLight.color.copy(skyNow.ambient);
-            ambientLight.intensity = skyNow.ambientI;
-            sunLight.color.copy(skyNow.sun);
-            sunLight.intensity = skyNow.sunI;
-            sunLight.position.set(skyNow.sunX, skyNow.sunY, skyNow.sunZ);
-            hemiLight.color.copy(skyNow.hemiSky);
-            hemiLight.groundColor.copy(skyNow.hemiGround);
-            hemiLight.intensity = skyNow.hemiI;
-
-            // ── 太阳跟随光照方向，月亮用独立方位角 ──
-            const sunAzimuth = Math.atan2(skyNow.sunX, skyNow.sunZ);
-            const D2R = Math.PI / 180;
-
-            function placeSprite(sprite, azimuth, elevDeg, dist) {
-                const el = elevDeg * D2R;
-                const cosEl = Math.cos(el);
-                sprite.position.x = Math.sin(azimuth) * cosEl * dist;
-                sprite.position.y = Math.sin(el) * dist + 1.6;
-                sprite.position.z = Math.cos(azimuth) * cosEl * dist;
-            }
-            placeSprite(sunSprite, sunAzimuth, skyNow.sunElev, 45);
-            placeSprite(moonSprite, skyNow.moonAz, skyNow.moonElev, 42);
-
-            // 透明度：仰角 > -3° 开始淡入，> 5° 完全可见
-            sunSprite.material.opacity  = Math.max(0, Math.min(1, (skyNow.sunElev + 3) / 8));
-            moonSprite.material.opacity = Math.max(0, Math.min(1, (skyNow.moonElev + 3) / 8));
-
-            // ── 星空闪烁 + 缓慢旋转（白天直接关闭，不占性能）──
-            const starsActive = skyNow.stars > 0.01;
-            if (starsActive) {
-                const now = performance.now() * 0.001;
-                starLayers.forEach((sf, idx) => {
-                    sf.visible = true;
-                    sf.rotation.y += dt * (0.015 + idx * 0.01);
-                    const base = skyNow.stars * (0.7 + idx * 0.15);
-                    const flicker = 0.85 + 0.15 * Math.sin(now * 1.7 + idx * 2.1);
-                    sf.material.opacity = Math.min(1, base * flicker);
-                });
-            } else {
-                starLayers.forEach(sf => { sf.visible = false; });
-            }
-        }
-
-        // ── 时间切换按钮 ──
+        // 时间切换按钮
         const timeBtns = {
             day: document.getElementById('btn-day'),
             dusk: document.getElementById('btn-dusk'),
@@ -656,2018 +173,214 @@
         timeBtns.dusk.addEventListener('click', () => { applySkyTarget('dusk'); setActiveTimeBtn('dusk'); });
         timeBtns.night.addEventListener('click', () => { applySkyTarget('night'); setActiveTimeBtn('night'); });
 
-        // ── VR 手柄切天空：左手 X/Y 键循环切换 ──
-        const skyCycle = ['day', 'dusk', 'night'];
-        function cycleSky(direction = 1) {
-            const idx = skyCycle.indexOf(skyTarget);
-            const next = skyCycle[(idx + direction + 3) % 3];
-            applySkyTarget(next);
-            setActiveTimeBtn(next);
-        }
-        let prevLeftX = false, prevLeftY = false;
-        function checkVRSkySwitch() {
-            if (leftBtnState.btnX && !prevLeftX) cycleSky(1);
-            if (leftBtnState.btnY && !prevLeftY) cycleSky(-1);
-            prevLeftX = leftBtnState.btnX;
-            prevLeftY = leftBtnState.btnY;
-        }
-
-        // ── 如来神掌释放（左手握柄侧键，两段式）──
-        let prevLeftGrip = false;
-        function checkBuddhaPalmTrigger() {
-            if (!buddhaPalmReady || buddhaPalmCooldown > 0) return;
-            if (leftBtnState.grip && !prevLeftGrip) {
-                if (buddhaPalmState === 'IDLE') {
-                    enterAimingMode();           // 第一次：升空瞄准
-                } else if (buddhaPalmState === 'AIMING') {
-                    releaseBuddhaPalm();          // 第二次：释放
-                }
-            }
-            prevLeftGrip = leftBtnState.grip;
-        }
-        /*  子弹参数速查表（修改下方数值即可调整）
-            --------------------------------------------------
-            发射口位置(相对于右手控制器):  muzzleLocal (0, 0, -0.2)
-                                           X=0      左右偏移
-                                           Y=0      上下偏移
-                                           Z=-0.2   前后偏移（负=前方）
-            --------------------------------------------------
-            子弹大小:                      SphereGeometry(0.03, 8, 8)
-                                           0.03 = 半径（米）
-            --------------------------------------------------
-            子弹颜色:                      color: 0xffaa00 (橙黄)
-                                           emissive: 0xff4400 (发光橙红)
-                                           emissiveIntensity: 0.8 (发光强度)
-            --------------------------------------------------
-            子弹速度:                      BULLET_SPEED = 15 (米/秒)
-            --------------------------------------------------
-            子弹寿命:                      BULLET_LIFE = 3 (秒)
-            --------------------------------------------------
-            射击冷却:                      SHOOT_COOLDOWN = 150 (毫秒，见上方)
-            --------------------------------------------------
-        */
-        const bullets = [];
-        const bulletGroup = new THREE.Group();
-        scene.add(bulletGroup);
-        const BULLET_SPEED = 15;   // <-- 子弹飞行速度（米/秒）
-        const BULLET_LIFE = 2;     // <-- 子弹存活时间（秒）
-
-        // ==================== 子弹对象池（消除 GC） ====================
-        const BULLET_POOL_SIZE = 20;
-        const sharedBulletGeom = new THREE.SphereGeometry(0.02, 8, 8);
-        const sharedBulletMat = new THREE.MeshStandardMaterial({
-            color: 0xffaa00,
-            emissive: 0xff4400,
-            emissiveIntensity: 0.8
-        });
-        const bulletPool = [];
-
-        function initBulletPool() {
-            for (let i = 0; i < BULLET_POOL_SIZE; i++) {
-                const mesh = new THREE.Mesh(sharedBulletGeom, sharedBulletMat);
-                mesh.userData = { active: false, vel: new THREE.Vector3(), life: 0 };
-                mesh.visible = false;
-                bulletGroup.add(mesh);
-                bulletPool.push(mesh);
-            }
-        }
-        initBulletPool();
-
-        function acquireBullet() {
-            for (let i = 0; i < bulletPool.length; i++) {
-                if (!bulletPool[i].userData.active) return bulletPool[i];
-            }
-            return null; // 池已满
-        }
-
-        // ==================== 子弹发射角度标注区 ====================
-        /*  如需修改子弹发射角度，在下方 shootBullet 中修改：
-            --------------------------------------------------
-            发射口位置(相对于右手控制器本地坐标):
-                muzzleLocal = (0, 0, -0.2)
-                X=0      左右偏移（米）
-                Y=0      上下偏移（米）
-                Z=-0.2   前后偏移（负=前方，米）
-            --------------------------------------------------
-            方向计算:
-                dir = (0, 0, -1) 应用控制器的旋转(quat)
-                = 沿控制器 Z 轴负方向（正前方）
-            --------------------------------------------------
-            【修改角度示例】在 dir 计算后添加以下代码：
-
-            // 固定俯仰偏移（抬头/低头）
-            const bulletPitch = -30 * Math.PI / 180;  // <-- -15度，负=低头
-            const aimQuat = new THREE.Quaternion();
-            aimQuat.setFromEuler(new THREE.Euler(bulletPitch, 0, 0));
-            dir.applyQuaternion(aimQuat);
-
-            // 或固定偏航偏移（左右摆动）
-            const bulletYaw = 5 * Math.PI / 180;  // <-- +5度，正=左偏
-            const aimQuat = new THREE.Quaternion();
-            aimQuat.setFromEuler(new THREE.Euler(0, bulletYaw, 0));
-            dir.applyQuaternion(aimQuat);
-
-            // 或同时修改俯仰+偏航
-            const aimQuat = new THREE.Quaternion();
-            aimQuat.setFromEuler(new THREE.Euler(bulletPitch, bulletYaw, 0));
-            dir.applyQuaternion(aimQuat);
-            --------------------------------------------------
-        */
-        function shootBullet(controller) {
-            // 主子弹
-            fireOneBullet(controller);
-            
-            // 如果启用额外子弹，再发射一颗（偏移一点）
-            if (extraBulletEnabled) {
-                setTimeout(() => fireOneBullet(controller), 50);
-            }
-        }
-        
-        function fireOneBullet(controller) {
-            const bullet = acquireBullet();
-            if (!bullet) return; // 池已满，跳过本次射击
-
-            initAudio(); // 用户首次射击时初始化 AudioContext
-            playShootSound();
-
-            // 发射口在控制器本地坐标系中的位置（修改这里调整子弹出膛位置）
-            const muzzleLocal = new THREE.Vector3(0, 0, -0.2);
-            const origin = muzzleLocal.clone().applyMatrix4(controller.matrixWorld);
-            const quat = controller.getWorldQuaternion(new THREE.Quaternion());
-
-            // ── 俯仰偏移在控制器本地坐标系中计算，避免水平转动时角度串扰 ──
-            // 先在本地空间构造俯仰四元数，再与控制器世界朝向合成
-            const bulletPitch = -30 * Math.PI / 180; // 负=向下低头（修改此处）
-            const localPitchQuat = new THREE.Quaternion().setFromEuler(
-                new THREE.Euler(bulletPitch, 0, 0)
-            );
-            // 合成：先控制器旋转，再本地俯仰 → 方向始终相对枪管轴
-            const finalQuat = quat.clone().multiply(localPitchQuat);
-            const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(finalQuat);
-
-            bullet.position.copy(origin);
-            bullet.userData.active = true;
-            bullet.userData.vel.copy(dir.normalize().multiplyScalar(BULLET_SPEED));
-            bullet.userData.life = BULLET_LIFE;
-            bullet.visible = true;
-            bullets.push(bullet);
-        }
-
-        function updateBullets(dt) {
-            for (let i = bullets.length - 1; i >= 0; i--) {
-                const b = bullets[i];
-                b.position.x += b.userData.vel.x * dt;
-                b.position.y += b.userData.vel.y * dt;
-                b.position.z += b.userData.vel.z * dt;
-                b.userData.life -= dt;
-
-                // 超出范围或生命结束则回池
-                if (b.userData.life <= 0 || b.position.y < 0 || b.position.y > 30) {
-                    b.userData.active = false;
-                    b.visible = false;
-                    bullets.splice(i, 1);
-                }
-            }
-        }
-
-        // ==================== 气球战斗系统配置 ====================
-        /*  气球参数速查表（修改下方数值即可调整）
-            --------------------------------------------------
-            气球数量:                      BALLOON_COUNT = 10
-            --------------------------------------------------
-            气球生命值:                    BALLOON_HP = 100
-            --------------------------------------------------
-            气球移动速度:                  BALLOON_SPEED = 1.0 (米/秒)
-            --------------------------------------------------
-            生成距离:                      BALLOON_SPAWN_RADIUS = 10 (米)
-                                           玩家初始位置方圆10米外
-            --------------------------------------------------
-            气球半径:                      BALLOON_RADIUS = 0.5 (米)
-            --------------------------------------------------
-            打破气球得分:                  BALLOON_SCORE = 10
-            --------------------------------------------------
-            子弹伤害:                      BULLET_DAMAGE = 30 (每发)
-            --------------------------------------------------
-        */
-        const balloons = [];
-        const balloonGroup = new THREE.Group();
-        scene.add(balloonGroup);
-        const BALLOON_SPEED = 0.5;         // <-- 气球移动速度（米/秒）
-        const BALLOON_SPAWN_RADIUS = 15;  // <-- 生成距离玩家半径（米）
-        const BALLOON_COUNT = 10;          // <-- 气球数量
-        const BALLOON_HP = 100;            // <-- 气球生命值
-        const BALLOON_SCORE = 10;          // <-- 打破气球得分
-        const BALLOON_RADIUS = 0.5;        // <-- 气球半径（米）
-        const BULLET_DAMAGE = 30;          // <-- 子弹伤害
-        const BALLOON_COLORS = [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff, 0xff88ff, 0x88ffff];
-
-        // 波次分阶段生成配置
-        const WAVE_BASE_SPAWN_COUNT = 30;   // 每波基础生成数量
-        const SPAWN_BATCH_INTERVAL = 1.0;   // 每1秒生成一批
-        const SPAWN_BATCH_SIZE = 3;         // 每批3个
-        const SPAWN_MAX_ACTIVE = 10;        // 场景内同时存在不超过10个
-        const SPAWN_DISTANCE = 15;          // 生成距离玩家（米）
-        const SPAWN_SPREAD = 8;             // 散布范围（米）
-
-        let waveSpawnRemaining = 0;         // 剩余待生成数
-        let waveSpawned = 0;                // 已生成数
-        let wavePhaseTimer = 0;             // 波次阶段计时器
-        let wavePhase = 0;                  // 1=前方, 2=加左右, 3=加后方
-        let spawnBatchTimer = 0;            // 批次生成计时器
-
-        function createBalloon(x, y, z) {
-            const geom = new THREE.SphereGeometry(BALLOON_RADIUS, 16, 16);
-            const color = BALLOON_COLORS[Math.floor(Math.random() * BALLOON_COLORS.length)];
-            const mat = new THREE.MeshStandardMaterial({
-                map: balloonTex.image ? balloonTex : null,  // 笑脸贴图
-                color: color,                                 // 随机染色
-                roughness: 0.3,
-                metalness: 0.1,
-                emissive: color,                              // 自发光（同色微光）
-                emissiveIntensity: 0.15
-            });
-            const balloon = new THREE.Mesh(geom, mat);
-            balloon.position.set(x, y, z);
-            balloon.castShadow = true;
-            balloon.userData = { active: true, hp: BALLOON_HP, maxHp: BALLOON_HP, isKnight: false, radius: BALLOON_RADIUS };
-            balloonGroup.add(balloon);
-            balloons.push(balloon);
-            return balloon;
-        }
-
-        // ── 骑士气球配置 ──
-        const KNIGHT_HP = 500;            // 骑士生命值
-        const KNIGHT_SCORE = 30;          // 骑士得分
-        const KNIGHT_SCALE = 3;           // 骑士模型缩放
-        const KNIGHT_RADIUS = 0.5 * KNIGHT_SCALE; // 碰撞半径随缩放变化
-
-        function createKnightBalloon(x, y, z) {
-            if (!knightModel) return createBalloon(x, y, z);
-            const knight = knightModel.clone();
-            knight.scale.setScalar(KNIGHT_SCALE);
-            knight.position.set(x, y, z);
-            knight.traverse(child => { if (child.isMesh) child.castShadow = true; });
-            knight.userData = { active: true, hp: KNIGHT_HP, maxHp: KNIGHT_HP, isKnight: true, radius: KNIGHT_RADIUS };
-            balloonGroup.add(knight);
-            balloons.push(knight);
-            return knight;
-        }
-
-        function disposeBalloon(b) {
-            if (b.userData.isKnight) {
-                b.traverse(child => {
-                    if (child.geometry) child.geometry.dispose();
-                    if (child.material) {
-                        if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
-                        else child.material.dispose();
+        // VR 会话
+        async function enterVR(isLeftHandMode = false) {
+            if (enterVRBtn.disabled) return;
+            enterVRBtn.disabled = true;
+            enterVRLeftHandBtn.disabled = true;
+            enterVRBtn.textContent = '⏳ 启动中...';
+            enterVRLeftHandBtn.textContent = '⏳ 启动中...';
+            try {
+                if (!navigator.xr) throw new Error('浏览器不支持 WebXR');
+                let session;
+                try {
+                    if (navigator.xr.isSessionSupported) {
+                        const supported = await navigator.xr.isSessionSupported('immersive-vr');
+                        if (!supported) throw new Error('设备不支持VR');
                     }
-                });
-            } else {
-                b.geometry.dispose();
-                b.material.dispose();
-            }
-            balloonGroup.remove(b);
-        }
-
-        function spawnBalloons() {
-            // 清除旧气球
-            balloons.forEach(b => disposeBalloon(b));
-            balloons.length = 0;
-
-            // 初始化波次分阶段生成状态
-            const totalSpawns = WAVE_BASE_SPAWN_COUNT + waveNumber * 5;
-            waveSpawnRemaining = totalSpawns;
-            waveSpawned = 0;
-            wavePhaseTimer = 0;
-            wavePhase = 1; // 第1阶段：只从前方生成
-            spawnBatchTimer = 0;
-
-            console.log(`🎈 第${waveNumber}波开始，目标生成 ${totalSpawns} 个气球`);
-        }
-
-        function spawnOneBalloon() {
-            const playerPos = dolly.position.clone();
-            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-            forward.y = 0; forward.normalize();
-            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-            right.y = 0; right.normalize();
-
-            let dirs = [];
-            // 前方始终有
-            dirs.push(playerPos.clone().add(forward.clone().multiplyScalar(SPAWN_DISTANCE)));
-
-            if (wavePhase >= 2) {
-                dirs.push(playerPos.clone().add(right.clone().multiplyScalar(SPAWN_DISTANCE)));  // 右
-                dirs.push(playerPos.clone().sub(right.clone().multiplyScalar(SPAWN_DISTANCE)));  // 左
-            }
-            if (wavePhase >= 3) {
-                dirs.push(playerPos.clone().sub(forward.clone().multiplyScalar(SPAWN_DISTANCE))); // 后方
-            }
-
-            const basePos = dirs[Math.floor(Math.random() * dirs.length)];
-            const x = basePos.x + (Math.random() - 0.5) * SPAWN_SPREAD;
-            const z = basePos.z + (Math.random() - 0.5) * SPAWN_SPREAD;
-            const y = 1.5 + Math.random() * 3;
-
-            // 骑士概率：第1波起约10%，随波次增加
-            const knightChance = (waveNumber >= 1) ? Math.min(0.35, 0.08 + waveNumber * 0.025) : 0;
-            const isKnight = Math.random() < knightChance;
-
-            if (isKnight) {
-                createKnightBalloon(x, y, z);
-            } else {
-                createBalloon(x, y, z);
-            }
-        }
-
-        function updateWaveSpawning(dt) {
-            if (waveSpawnRemaining <= 0) return;
-
-            wavePhaseTimer += dt;
-
-            // 阶段切换：15秒开启左右，30秒开启后方
-            if (wavePhase === 1 && wavePhaseTimer >= 15) {
-                wavePhase = 2;
-                console.log('🎈 左右方向开始生成气球');
-            } else if (wavePhase === 2 && wavePhaseTimer >= 30) {
-                wavePhase = 3;
-                console.log('🎈 后方也开始生成气球');
-            }
-
-            // 批次生成：每秒一批，每批3个
-            spawnBatchTimer += dt;
-            if (spawnBatchTimer >= SPAWN_BATCH_INTERVAL) {
-                spawnBatchTimer -= SPAWN_BATCH_INTERVAL;
-
-                const activeCount = balloons.filter(b => b.userData.active).length;
-                const canSpawn = Math.min(SPAWN_BATCH_SIZE, SPAWN_MAX_ACTIVE - activeCount, waveSpawnRemaining);
-
-                for (let i = 0; i < canSpawn; i++) {
-                    spawnOneBalloon();
-                    waveSpawnRemaining--;
-                    waveSpawned++;
+                    session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'] });
+                } catch (e) {
+                    console.log('使用 PICO 兼容模式:', e.message);
+                    session = await navigator.xr.requestSession('immersive-vr');
                 }
+                STATE.leftHandGunEnabled = isLeftHandMode;
+                window.__log('左手持枪模式: ' + (isLeftHandMode ? '启用' : '未启用'), 'i');
+                renderer.xr.enabled = true;
+                renderer.xr.setSession(session);
+                window.__log('WebXR 会话已启动', 's');
+                enterVRBtn.disabled = false;
+                enterVRLeftHandBtn.disabled = false;
+                enterVRBtn.textContent = '🎈 正常开始游戏';
+                enterVRLeftHandBtn.textContent = '🔫 左手持枪模式';
+            } catch (err) {
+                window.__log('VR 会话请求失败: ' + err.message, 'e');
+                statusMsgEl.innerHTML = '❌ ' + err.message;
+                statusMsgEl.classList.add('error');
+                enterVRBtn.disabled = false;
+                enterVRLeftHandBtn.disabled = false;
+                enterVRBtn.textContent = '🎈 正常开始游戏';
+                enterVRLeftHandBtn.textContent = '🔫 左手持枪模式';
             }
         }
 
-        function updateBalloons(dt) {
-            const playerPos = dolly.position.clone();
-            playerPos.y += 1.6; // 对准玩家头部高度
+        enterVRBtn.onclick = () => enterVR(false);
+        enterVRLeftHandBtn.onclick = () => enterVR(true);
 
-            // ---- 气球-气球排斥（防止重叠） ----
-            for (let i = 0; i < balloons.length; i++) {
-                const a = balloons[i];
-                if (!a.userData.active) continue;
-                for (let j = i + 1; j < balloons.length; j++) {
-                    const b = balloons[j];
-                    if (!b.userData.active) continue;
-
-                    const dx = a.position.x - b.position.x;
-                    const dz = a.position.z - b.position.z;
-                    const dy = a.position.y - b.position.y;
-                    const distSq = dx * dx + dy * dy + dz * dz;
-                    const minDist = a.userData.radius + b.userData.radius;
-
-                    if (distSq < minDist * minDist && distSq > 0.0001) {
-                        const dist = Math.sqrt(distSq);
-                        const overlap = minDist - dist;
-                        const pushX = (dx / dist) * overlap * BALLOON_REPEL_FORCE * dt;
-                        const pushY = (dy / dist) * overlap * BALLOON_REPEL_FORCE * dt * 0.3; // Y轴弱排斥
-                        const pushZ = (dz / dist) * overlap * BALLOON_REPEL_FORCE * dt;
-
-                        a.position.x += pushX;
-                        a.position.y += pushY;
-                        a.position.z += pushZ;
-                        b.position.x -= pushX;
-                        b.position.y -= pushY;
-                        b.position.z -= pushZ;
-                    }
-                }
-            }
-
-            // ---- 气球-船碰撞（简化球体碰撞） ----
-            const shipCenter = shipModel ? shipModel.position.clone() : new THREE.Vector3(0, 1, 0);
-            shipCenter.y += 1.0; // 船中心偏上
-
-            for (let i = 0; i < balloons.length; i++) {
-                const b = balloons[i];
-                if (!b.userData.active) continue;
-
-                const dx = b.position.x - shipCenter.x;
-                const dy = b.position.y - shipCenter.y;
-                const dz = b.position.z - shipCenter.z;
-                const distSq = dx * dx + dy * dy + dz * dz;
-                const minDist = b.userData.radius + SHIP_COLLISION_RADIUS;
-
-                if (distSq < minDist * minDist && distSq > 0.0001) {
-                    const dist = Math.sqrt(distSq);
-                    const overlap = minDist - dist;
-                    // 沿表面滑动：只推水平方向，保留Y轴移动
-                    const pushX = (dx / dist) * overlap * SHIP_REPEL_FORCE;
-                    const pushZ = (dz / dist) * overlap * SHIP_REPEL_FORCE;
-
-                    b.position.x += pushX;
-                    b.position.z += pushZ;
-                }
-            }
-
-            for (let i = balloons.length - 1; i >= 0; i--) {
-                const b = balloons[i];
-                if (!b.userData.active) continue;
-
-                // 向玩家移动
-                const dir = new THREE.Vector3().subVectors(playerPos, b.position).normalize();
-                b.position.x += dir.x * BALLOON_SPEED * dt;
-                b.position.y += dir.y * BALLOON_SPEED * dt;
-                b.position.z += dir.z * BALLOON_SPEED * dt;
-
-                // 面朝玩家（普通气球旋转贴图；骑士模型整体转向）
-                if (!b.userData.isKnight) {
-                    b.lookAt(playerPos);
-                    b.rotateY(-Math.PI / 2);
-                } else {
-                    b.lookAt(playerPos);
-                }
-
-                // 漂浮动画
-                b.position.y += Math.sin(performance.now() * 0.003 + i) * 0.002;
-
-                // ---- 气球船受伤检测：气球进入 4x8 活动区域 ----
-                const bx = Math.abs(b.position.x);
-                const bz = Math.abs(b.position.z);
-                if (bx <= BOUND_X && bz <= BOUND_Z) {
-                    // 气球进入活动区域，爆炸并伤害气球船
-                    b.userData.active = false;
-                    b.visible = false;
-                    shipHp -= BALLOON_DAMAGE;
-                    shipHitFlash = 0.3; // 闪烁0.3秒
-                    playBalloonPopSound();
-                    // 碎片+粒子效果
-                    const debrisColor = b.userData.isKnight ? 0x888888 : (b.material.color ? b.material.color.getHex() : 0xff4444);
-                    spawnDebris(b.position.clone(), debrisColor, b.userData.isKnight ? 12 : 8);
-                    spawnParticles(b.position.clone(), 0xff4444, 15);
-                    console.log(`💥 气球撞船！船HP: ${shipHp}/${SHIP_MAX_HP}`);
-
-                    // 检查游戏结束
-                    if (shipHp <= 0) {
-                        shipHp = 0;
-                        gameOver();
-                    }
-                }
-            }
-        }
-
-        function checkBulletBalloonCollisions() {
-            for (let i = bullets.length - 1; i >= 0; i--) {
-                const bullet = bullets[i];
-                for (let j = balloons.length - 1; j >= 0; j--) {
-                    const balloon = balloons[j];
-                    if (!balloon.userData.active) continue;
-
-                    const hitRadius = balloon.userData.radius || BALLOON_RADIUS;
-                    const dist = bullet.position.distanceTo(balloon.position);
-                    if (dist < hitRadius + 0.05) {
-                        // 受伤
-                        balloon.userData.hp -= playerStats.atk;
-
-                        // 击中闪烁（仅普通气球有 emissiveIntensity）
-                        if (!balloon.userData.isKnight && balloon.material.emissiveIntensity !== undefined) {
-                            balloon.material.emissiveIntensity = 0.5;
-                            setTimeout(() => {
-                                if (balloon.userData) balloon.material.emissiveIntensity = 0.15;
-                            }, 100);
-                        }
-
-                        // 检查是否被打破
-                        if (balloon.userData.hp <= 0) {
-                            balloon.userData.active = false;
-                            if (balloon.userData.isKnight) {
-                                balloon.traverse(c => { if (c.isMesh) c.visible = false; });
-                            } else {
-                                balloon.visible = false;
-                            }
-                            playerStats.score += balloon.userData.isKnight ? KNIGHT_SCORE : BALLOON_SCORE;
-                            playBalloonPopSound();
-                            // 碎片效果
-                            const debrisColor = balloon.userData.isKnight ? 0x888888 : (balloon.material.color ? balloon.material.color.getHex() : 0xff4444);
-                            spawnDebris(balloon.position.clone(), debrisColor, balloon.userData.isKnight ? 12 : 8);
-                            spawnParticles(balloon.position.clone(), debrisColor, 20);
-                        }
-                        // 子弹销毁
-                        bullet.userData.active = false;
-                        bullet.visible = false;
-                        bullets.splice(i, 1);
-
-                        checkAllBalloonsDestroyed();
-                        break;
-                    }
-                }
-            }
-        }
-
-        function checkAllBalloonsDestroyed() {
-            const activeBalloons = balloons.filter(b => b.userData.active);
-            // 全部击破且本波次已生成完毕，才进入下一波
-            if (activeBalloons.length === 0 && waveSpawnRemaining <= 0 && !choiceCardsActive) {
-                spawnChoiceCards();
-            }
-        }
-
-        // ==================== 选择卡系统配置 ====================
-        /*  选择卡参数速查表（修改下方数值即可调整）
-            --------------------------------------------------
-            选择卡距离玩家:                CHOICE_CARD_DISTANCE = 2.5 (米)
-            --------------------------------------------------
-            选择卡尺寸:                    宽 0.5米, 高 0.3米
-            --------------------------------------------------
-            选择卡存在时间:                10秒（超时自动消失）
-            --------------------------------------------------
-            选择卡效果:
-                [0] 生命值+100
-                [1] 攻击力+20
-                [2] 射击额外发射一颗子弹
-            --------------------------------------------------
-        */
-        let choiceCardsActive = false;
-        let extraBulletEnabled = false; // 是否启用额外子弹
-        let selectedCardIndex = -1;     // 当前高亮的选择卡索引
-        let cardHighlightTime = 0;      // 选择卡高亮计时
-        let choiceCardTimeout = null;   // 选择卡超时自动关闭计时器
-        const choiceCardGroup = new THREE.Group();
-        // 挂到 dolly（跟随玩家的组），保证 VR 中坐标系正确
-        dolly.add(choiceCardGroup);
-        const CHOICE_CARD_DISTANCE = 1.5; // 选择卡距离玩家（米），改为1.5避免太近
-
-        const choiceOptions = [
-            { 
-                label: '生命值+100', 
-                color: { r: 255, g: 60, b: 60 },
-                effect: () => { 
-                    playerStats.hp += 100; 
-                    console.log('✅ 选择了：生命值+100'); 
-                }
-            },
-            { 
-                label: '攻击力+20',  
-                color: { r: 255, g: 180, b: 0 },
-                effect: () => { 
-                    playerStats.atk += 20; 
-                    console.log('✅ 选择了：攻击力+20'); 
-                }
-            },
-            { 
-                label: '多一发子弹', 
-                color: { r: 60, g: 150, b: 255 },
-                effect: () => { 
-                    extraBulletEnabled = true; 
-                    console.log('✅ 选择了：多一发子弹'); 
-                }
-            }
-        ];
-
-        function createChoiceCard(option, index) {
-            const canvas = document.createElement('canvas');
-            canvas.width = 512;
-            canvas.height = 256;
-            const ctx = canvas.getContext('2d');
-
-            // 背景
-            ctx.fillStyle = `rgba(${option.color.r},${option.color.g},${option.color.b},0.9)`;
-            roundRect(ctx, 0, 0, 512, 256, 32);
-            ctx.fill();
-
-            // 边框
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 8;
-            roundRect(ctx, 4, 4, 504, 248, 28);
-            ctx.stroke();
-
-            // 文字
-            ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 48px "Microsoft YaHei", sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText(option.label, 256, 140);
-            
-            // 提示文字
-            ctx.font = '28px "Microsoft YaHei", sans-serif';
-            ctx.fillText('← 用左手柄碰触 →', 256, 190);
-
-            const texture = new THREE.CanvasTexture(canvas);
-            const geom = new THREE.PlaneGeometry(0.5, 0.3);
-            const mat = new THREE.MeshBasicMaterial({
-                map: texture,
-                transparent: true,
-                side: THREE.DoubleSide
-            });
-            const card = new THREE.Mesh(geom, mat);
-            card.userData = { 
-                isChoiceCard: true, 
-                label: option.label, 
-                index: index,
-                optionIndex: index,
-                originalColor: { r: option.color.r, g: option.color.g, b: option.color.b },
-                canvas: canvas,
-                ctx: ctx,
-                texture: texture
-            };
-            return card;
-        }
-
-        function spawnChoiceCards() {
-            if (choiceCardsActive) return;
-            choiceCardsActive = true;
-            selectedCardIndex = -1;
-            cardHighlightTime = 0;
-
-            // 清除旧选择卡
-            while (choiceCardGroup.children.length > 0) {
-                const child = choiceCardGroup.children[0];
-                if (child.material.map) child.material.map.dispose();
-                child.material.dispose();
-                child.geometry.dispose();
-                choiceCardGroup.remove(child);
-            }
-
-            // ── 选择卡在 dolly 局部坐标系中布置（VR/非VR 都正确）──
-            // 相机在 dolly 中的位置（通常是 (0,1.6,0)）
-            const camLocalPos = camera.position.clone(); // dolly 局部坐标
-            // 相机在 dolly 中的朝向
-            const camLocalDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-            camLocalDir.y = 0; // 水平化，避免卡片上下偏斜
-            if (camLocalDir.lengthSq() < 0.001) camLocalDir.set(0, 0, -1);
-            camLocalDir.normalize();
-
-            // 选择卡基础位置：玩家前方 CHOICE_CARD_DISTANCE 米，固定在眼睛高度
-            const basePos = camLocalPos.clone().add(camLocalDir.clone().multiplyScalar(CHOICE_CARD_DISTANCE));
-            basePos.y = camLocalPos.y - 0.2; // 眼高略偏下，方便看到
-
-            // 相机右方向（dolly 局部坐标）
-            const camLocalRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-            camLocalRight.y = 0;
-            camLocalRight.normalize();
-
-            // 面朝玩家的方向（在dolly坐标系中）
-            const faceTarget = camLocalPos.clone(); // 朝向玩家眼睛
-
-            for (let i = 0; i < 3; i++) {
-                const card = createChoiceCard(choiceOptions[i], i);
-                const offset = (i - 1) * 0.55; // 三张卡横向排列，间距 0.55 米
-                card.position.copy(basePos).addScaledVector(camLocalRight, offset);
-                card.lookAt(faceTarget);
-                choiceCardGroup.add(card);
-            }
-
-            console.log('🎴 选择卡已生成，等待左手柄碰触...');
-            
-            // 超时保护：10 秒内未选择则自动进入下一轮（防止黑屏卡死）
-            if (choiceCardTimeout) clearTimeout(choiceCardTimeout);
-            choiceCardTimeout = setTimeout(() => {
-                if (choiceCardsActive) {
-                    console.log('⏱️ 选择卡超时，自动跳过进入下一轮');
-                    clearChoiceCards();
-                }
-            }, 10000);
-        }
-
-        function clearChoiceCards() {
-            choiceCardsActive = false;
-            // 清除超时计时器
-            if (choiceCardTimeout) {
-                clearTimeout(choiceCardTimeout);
-                choiceCardTimeout = null;
-            }
-            while (choiceCardGroup.children.length > 0) {
-                const child = choiceCardGroup.children[0];
-                if (child.material.map) child.material.map.dispose();
-                child.material.dispose();
-                child.geometry.dispose();
-                choiceCardGroup.remove(child);
-            }
-            
-            // 选择卡清除后，重新生成气球
-            setTimeout(() => {
-                waveNumber++; // 每清完一波，波次+1
-                // 打完第二波（waveNumber==2）解锁如来神掌
-                // waveNumber>=2 即打完第2波解锁（第0波=初始，第1波=出骑士，第2波=解锁神掌）
-                if (waveNumber >= 1 && !buddhaPalmReady) {
-                    buddhaPalmReady = true;
-                    setTimeout(() => attachBuddhaPalmToLeft(), 500);
-                    console.log('🖐️ 如来神掌已解锁！左手握柄侧键释放');
-                }
-                spawnBalloons();
-                console.log('🎈 第' + waveNumber + '波气球已生成（含骑士:' + (waveNumber >= 1 ? '是' : '否') + '）');
-            }, 1000);
-        }
-
-        // 用左手柄碰触选择卡
-        function checkLeftHandChoiceCardCollision() {
-            if (!choiceCardsActive || !leftController) return;
-
-            // 获取左手控制器世界坐标
-            const leftPos = new THREE.Vector3();
-            leftController.getWorldPosition(leftPos);
-
-            for (let j = choiceCardGroup.children.length - 1; j >= 0; j--) {
-                const card = choiceCardGroup.children[j];
-                if (!card.userData.isChoiceCard) continue;
-
-                // 获取选择卡世界坐标（选择卡挂在 dolly 下，需要转换）
-                const cardWorldPos = new THREE.Vector3();
-                card.getWorldPosition(cardWorldPos);
-
-                const dist = leftPos.distanceTo(cardWorldPos);
-                if (dist < 0.4) {
-                    // 左手柄碰触选择卡
-                    const index = card.userData.index;
-                    choiceOptions[index].effect();
-                    
-                    // 清除选择卡并重新开始
-                    clearChoiceCards();
-                    return;
-                }
-            }
-        }
-
-        // ==================== 粒子系统 ====================
-        const particles = [];
-        const particleGroup = new THREE.Group();
-        scene.add(particleGroup);
-        const PARTICLE_COUNT = 50;
-        const PARTICLE_LIFE = 1.0; // 粒子生命周期（秒）
-
-        // 粒子对象池
-        const particlePool = [];
-        function initParticlePool() {
-            for (let i = 0; i < PARTICLE_COUNT; i++) {
-                const geom = new THREE.SphereGeometry(0.01, 4, 4);
-                const mat = new THREE.MeshBasicMaterial({
-                    color: 0xffffff,
-                    transparent: true,
-                    opacity: 1.0
-                });
-                const mesh = new THREE.Mesh(geom, mat);
-                mesh.userData = { active: false, vel: new THREE.Vector3(), life: 0 };
-                mesh.visible = false;
-                particleGroup.add(mesh);
-                particlePool.push(mesh);
-            }
-        }
-        initParticlePool();
-
-        // ==================== 气球碎片系统（对象池） ====================
-        const DEBRIS_COUNT = 30;          // 最大碎片数
-        const DEBRIS_LIFE = 0.8;          // 碎片生命周期（秒）
-        const debrisGroup = new THREE.Group();
-        scene.add(debrisGroup);
-        const debrisPool = [];
-
-        function initDebrisPool() {
-            const geom = new THREE.TetrahedronGeometry(0.04, 0); // 四面体碎片
-            for (let i = 0; i < DEBRIS_COUNT; i++) {
-                const mat = new THREE.MeshBasicMaterial({
-                    color: 0xffffff,
-                    transparent: true,
-                    opacity: 1.0,
-                    side: THREE.DoubleSide
-                });
-                const mesh = new THREE.Mesh(geom, mat);
-                mesh.userData = {
-                    active: false,
-                    vel: new THREE.Vector3(),
-                    rotVel: new THREE.Vector3(),
-                    life: 0
-                };
-                mesh.visible = false;
-                debrisGroup.add(mesh);
-                debrisPool.push(mesh);
-            }
-        }
-        initDebrisPool();
-
-        // 生成气球碎片
-        function spawnDebris(position, color, count = 8) {
-            for (let i = 0; i < count; i++) {
-                const d = debrisPool.find(d => !d.userData.active);
-                if (!d) break;
-
-                d.position.copy(position);
-                // 随机爆炸方向（半球向上）
-                const angle = Math.random() * Math.PI * 2;
-                const speed = 1.5 + Math.random() * 2.5;
-                const upBias = Math.random() * 1.5;
-                d.userData.vel.set(
-                    Math.cos(angle) * speed,
-                    upBias + Math.random() * 2,
-                    Math.sin(angle) * speed
-                );
-                // 随机旋转
-                d.userData.rotVel.set(
-                    (Math.random() - 0.5) * 10,
-                    (Math.random() - 0.5) * 10,
-                    (Math.random() - 0.5) * 10
-                );
-                d.userData.active = true;
-                d.userData.life = DEBRIS_LIFE;
-                d.material.color.setHex(color);
-                d.material.opacity = 1.0;
-                d.visible = true;
-            }
-        }
-
-        // 更新碎片
-        function updateDebris(dt) {
-            for (let i = 0; i < debrisPool.length; i++) {
-                const d = debrisPool[i];
-                if (!d.userData.active) continue;
-
-                // 物理更新
-                d.position.addScaledVector(d.userData.vel, dt);
-                d.userData.vel.y -= 4.0 * dt; // 重力
-                d.userData.vel.multiplyScalar(0.98); // 空气阻力
-                d.rotation.x += d.userData.rotVel.x * dt;
-                d.rotation.y += d.userData.rotVel.y * dt;
-                d.rotation.z += d.userData.rotVel.z * dt;
-
-                d.userData.life -= dt;
-                d.material.opacity = Math.max(0, d.userData.life / DEBRIS_LIFE);
-
-                if (d.userData.life <= 0 || d.position.y < -2) {
-                    d.userData.active = false;
-                    d.visible = false;
-                }
-            }
-        }
-        
-        function spawnParticles(position, color, count = 30) {
-            for (let i = 0; i < count; i++) {
-                const p = particlePool.find(p => !p.userData.active);
-                if (!p) break;
-                
-                p.position.copy(position);
-                p.userData.active = true;
-                p.userData.life = PARTICLE_LIFE;
-                p.userData.vel.set(
-                    (Math.random() - 0.5) * 2,
-                    (Math.random() - 0.5) * 2,
-                    (Math.random() - 0.5) * 2
-                );
-                p.material.color.setHex(color);
-                p.material.opacity = 1.0;
-                p.visible = true;
-            }
-        }
-        
-        function updateParticles(dt) {
-            for (let i = 0; i < particlePool.length; i++) {
-                const p = particlePool[i];
-                if (!p.userData.active) continue;
-                
-                p.position.addScaledVector(p.userData.vel, dt);
-                p.userData.vel.multiplyScalar(0.98); // 阻尼
-                p.userData.life -= dt;
-                p.material.opacity = Math.max(0, p.userData.life / PARTICLE_LIFE);
-                
-                if (p.userData.life <= 0) {
-                    p.userData.active = false;
-                    p.visible = false;
-                }
-            }
-        }
-        function createCartoonCloudTexture(size = 512, cloudCount = 25) {
-            const canvas = document.createElement('canvas');
-            canvas.width = size;
-            canvas.height = size;
-            const ctx = canvas.getContext('2d');
-            ctx.clearRect(0, 0, size, size);
-
-            function drawCloud(cx, cy, baseR) {
-                const parts = [
-                    [0, 0, baseR],
-                    [-baseR * 0.7, -baseR * 0.3, baseR * 0.8],
-                    [baseR * 0.7, -baseR * 0.3, baseR * 0.9],
-                    [-baseR * 0.4, -baseR * 0.7, baseR * 0.7],
-                    [baseR * 0.4, -baseR * 0.7, baseR * 0.75],
-                    [0, -baseR * 0.9, baseR * 0.7],
-                ];
-                ctx.fillStyle = '#000000';
-                parts.forEach(([dx, dy, r]) => {
-                    ctx.beginPath();
-                    ctx.arc(cx + dx, cy + dy, r + 2, 0, Math.PI * 2);
-                    ctx.fill();
-                });
-                ctx.fillStyle = '#ffffff';
-                parts.forEach(([dx, dy, r]) => {
-                    ctx.beginPath();
-                    ctx.arc(cx + dx, cy + dy, r, 0, Math.PI * 2);
-                    ctx.fill();
-                });
-            }
-
-            const margin = size * 0.1;
-            for (let i = 0; i < cloudCount; i++) {
-                const cx = margin + Math.random() * (size - margin * 2);
-                const cy = margin + Math.random() * (size - margin * 2);
-                const r = size * 0.04 + Math.random() * size * 0.06;
-                drawCloud(cx, cy, r);
-            }
-            return new THREE.CanvasTexture(canvas);
-        }
-
-        function createCloudLayer(y, repeatCount, speed) { /* 已废弃 */ }
-
-        // 脚下云海已移除 — 改为真实 dolly 移动
-        const cloudLayers = [];
-        loadingResources.texture = true;
-        checkAllLoaded();
-
-        // 添加云朵装饰（MeshBasicMaterial省GPU，8,6段数降低三角面）
-        function createCloud(x, y, z, scale = 1) {
-            const cloudGroup = new THREE.Group();
-            const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff }); // 无光照计算
-
-            const spheres = [
-                { pos: [0, 0, 0], r: 0.8 },
-                { pos: [0.6, 0.2, 0], r: 0.6 },
-                { pos: [-0.6, 0.1, 0], r: 0.55 },
-            ]; // 简化为3个球，减少DrawCall和三角面
-
-            spheres.forEach(s => {
-                const sphere = new THREE.Mesh(
-                    new THREE.SphereGeometry(s.r, 8, 6), // 8x6降低三角面
-                    cloudMat
-                );
-                sphere.position.set(...s.pos);
-                cloudGroup.add(sphere);
-            });
-            
-            cloudGroup.position.set(x, y, z);
-            cloudGroup.scale.setScalar(scale);
-            return cloudGroup;
-        }
-
-        // 装饰云朵（散布在场景中，dolly 真移动后自然产生相对运动）
-        const clouds = [
-            createCloud(-8, 5, -10, 1.5), createCloud(10, 6, -15, 2),
-            createCloud(-5, 7, 8, 1.2),   createCloud(15, 5, 5, 1.8),
-            createCloud(3, 8, -20, 2.2),  createCloud(-12, 4, 3, 1.0),
-            createCloud(20, 6, -8, 1.6),  createCloud(-18, 5, -12, 1.4),
-            createCloud(0, 9, 15, 2.5),   createCloud(-8, 3, -25, 1.3),
-            createCloud(25, 7, 10, 1.7),  createCloud(-22, 4, -18, 1.1),
-        ];
-        clouds.forEach(cloud => scene.add(cloud));
-
-        // -------------------- 玩家状态（右手UI显示） --------------------
-        const playerStats = { hp: 100, score: 50, atk: 30 };
-
-        // -------------------- 气球船状态 --------------------
-        const SHIP_MAX_HP = 100;
-        let shipHp = SHIP_MAX_HP;
-        const BALLOON_DAMAGE = 5;   // 每个气球对船的伤害
-        let shipHitFlash = 0;       // 受伤闪烁计时
-
-        // -------------------- 碰撞系统配置 --------------------
-        const SHIP_COLLISION_RADIUS = 2.5;  // 船碰撞半径（简化球体）
-        const BALLOON_REPEL_FORCE = 3.0;    // 气球互斥强度
-        const SHIP_REPEL_FORCE = 2.0;       // 船排斥强度
-
-        // -------------------- 左右手柄按键状态（左手UI显示） --------------------
-        const leftBtnState = { trigger: false, grip: false, stickBtn: false, btnX: false, btnY: false };
-        const rightBtnState = { trigger: false, grip: false, stickBtn: false, btnA: false, btnB: false };
-
-        // -------------------- 调试 UI 面板（右手腕 3D Canvas） --------------------
-        let debugPanel = null;
-        let debugCanvas = null;
-        let debugCtx = null;
-        let debugTexture = null;
-
-        function createDebugPanel() {
-            debugCanvas = document.createElement('canvas');
-            debugCanvas.width = 512;
-            debugCanvas.height = 256;
-            debugCtx = debugCanvas.getContext('2d');
-
-            debugTexture = new THREE.CanvasTexture(debugCanvas);
-
-            const panelGeo = new THREE.PlaneGeometry(0.18, 0.09);
-            const panelMat = new THREE.MeshBasicMaterial({
-                map: debugTexture,
-                transparent: true,
-                depthTest: false,
-                depthWrite: false,
-                side: THREE.DoubleSide
-            });
-            debugPanel = new THREE.Mesh(panelGeo, panelMat);
-
-            // 手腕背侧，稍微倾斜让玩家翻腕可见
-            debugPanel.position.set(0, 0.06, 0.04);
-            debugPanel.rotation.x = -Math.PI * 0.35;
-
-            drawDebugPanel('初始化中...');
-            return debugPanel;
-        }
-
-        function drawDebugPanel(info, hpColor) {
-            if (!debugCtx) return;
-            const c = debugCtx;
-            const w = debugCanvas.width;
-            const h = debugCanvas.height;
-
-            c.clearRect(0, 0, w, h);
-
-            // 受伤闪烁效果
-            if (shipHitFlash > 0) {
-                c.fillStyle = `rgba(255,0,0,${shipHitFlash * 0.5})`;
-                c.fillRect(0, 0, w, h);
-                shipHitFlash = Math.max(0, shipHitFlash - 0.016);
-            }
-
-            c.fillStyle = 'rgba(0,0,0,0.82)';
-            roundRect(c, 0, 0, w, h, 24);
-            c.fill();
-
-            c.strokeStyle = '#00ffcc';
-            c.lineWidth = 4;
-            roundRect(c, 2, 2, w - 4, h - 4, 22);
-            c.stroke();
-
-            c.fillStyle = hpColor || '#ff3333';
-            c.font = 'bold 28px monospace';
-            c.fillText('🚢 气球船状态', 18, 42);
-
-            c.fillStyle = '#ffffff';
-            c.font = '22px monospace';
-            const lines = info.split('\n');
-            lines.forEach((line, i) => {
-                c.fillText(line, 18, 80 + i * 30);
-            });
-
-            if (debugTexture) debugTexture.needsUpdate = true;
-        }
-
-        function roundRect(ctx, x, y, w, h, r) {
-            ctx.beginPath();
-            ctx.moveTo(x + r, y);
-            ctx.lineTo(x + w - r, y);
-            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-            ctx.lineTo(x + w, y + h - r);
-            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-            ctx.lineTo(x + r, y + h);
-            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-            ctx.lineTo(x, y + r);
-            ctx.quadraticCurveTo(x, y, x + r, y);
-            ctx.closePath();
-        }
-
-        function updateDebugPanel() {
-            if (!rightGrip || !debugPanel) return;
-
-            const activeBalloons = balloons.filter(b => b.userData.active).length;
-            const extraBulletStr = extraBulletEnabled ? '✅' : '❌';
-            const phaseNames = ['', '前', '前+左右', '全方向'];
-            const phaseStr = wavePhase > 0 ? `阶段${phaseNames[wavePhase]}` : '';
-            const hpColor = shipHp > 50 ? '#ff3333' : shipHp > 20 ? '#ffaa00' : '#ff0000';
-            const info = [
-                `🚢 船血  ${shipHp}/${SHIP_MAX_HP}`,
-                `🎯 得分  ${playerStats.score}`,
-                `⚔️ 攻击  ${playerStats.atk}`,
-                `🎈 气球  ${activeBalloons}/${SPAWN_MAX_ACTIVE} 剩${waveSpawnRemaining}`,
-                `🔫 双弹  ${extraBulletStr}`,
-                `🌊 波次${waveNumber} ${phaseStr}`
-            ].join('\n');
-
-            drawDebugPanel(info, hpColor);
-        }
-
-        // -------------------- 左手激光角度 UI 面板 --------------------
-        let leftDebugPanel = null;
-        let leftDebugCanvas = null;
-        let leftDebugCtx = null;
-        let leftDebugTexture = null;
-
-        function createLeftDebugPanel() {
-            leftDebugCanvas = document.createElement('canvas');
-            leftDebugCanvas.width = 512;
-            leftDebugCanvas.height = 256;
-            leftDebugCtx = leftDebugCanvas.getContext('2d');
-
-            leftDebugTexture = new THREE.CanvasTexture(leftDebugCanvas);
-
-            const panelGeo = new THREE.PlaneGeometry(0.18, 0.09);
-            const panelMat = new THREE.MeshBasicMaterial({
-                map: leftDebugTexture,
-                transparent: true,
-                depthTest: false,
-                depthWrite: false,
-                side: THREE.DoubleSide
-            });
-            leftDebugPanel = new THREE.Mesh(panelGeo, panelMat);
-
-            // 手腕背侧，稍微倾斜让玩家翻腕可见
-            leftDebugPanel.position.set(0, 0.06, 0.04);
-            leftDebugPanel.rotation.x = -Math.PI * 0.35;
-
-            drawLeftDebugPanel('初始化中...');
-            return leftDebugPanel;
-        }
-
-        function drawLeftDebugPanel(info, countdown) {
-            if (!leftDebugCtx) return;
-            const c = leftDebugCtx;
-            const w = leftDebugCanvas.width;
-            const h = leftDebugCanvas.height;
-
-            c.clearRect(0, 0, w, h);
-            c.fillStyle = 'rgba(0,0,0,0.82)';
-            roundRect(c, 0, 0, w, h, 24);
-            c.fill();
-
-            c.strokeStyle = '#ff6600';
-            c.lineWidth = 4;
-            roundRect(c, 2, 2, w - 4, h - 4, 22);
-            c.stroke();
-
-            // 瞄准倒计时模式：只显示超大数字，无其他文字
-            if (typeof countdown === 'number') {
-                const numStr = String(Math.max(0, Math.ceil(countdown)));
-                const fontSize = 180;
-                c.textAlign = 'center';
-                c.textBaseline = 'middle';
-
-                // 黑色描边，让数字在任意背景下都清晰
-                c.strokeStyle = '#000000';
-                c.lineWidth = 12;
-                c.font = `bold ${fontSize}px monospace`;
-                c.strokeText(numStr, w / 2, h / 2);
-
-                // 金色填充
-                c.fillStyle = '#ffd700';
-                c.fillText(numStr, w / 2, h / 2);
-
-                // 重置对齐
-                c.textAlign = 'start';
-                c.textBaseline = 'alphabetic';
-
-                if (leftDebugTexture) leftDebugTexture.needsUpdate = true;
-                return;
-            }
-
-            c.fillStyle = '#00ccff';
-            c.font = 'bold 28px monospace';
-            c.fillText('🎮 手柄按键', 18, 42);
-
-            c.fillStyle = '#ffffff';
-            c.font = '22px monospace';
-            const lines = info.split('\n');
-            lines.forEach((line, i) => {
-                c.fillText(line, 18, 80 + i * 30);
-            });
-
-            if (leftDebugTexture) leftDebugTexture.needsUpdate = true;
-        }
-
-        function updateLeftDebugPanel() {
-            if (!leftGrip || !leftDebugPanel) return;
-
-            // 瞄准中：直接显示超大倒计时数字，无其他文字
-            if (buddhaPalmState === 'AIMING') {
-                drawLeftDebugPanel('', buddhaPalmTimer);
-                return;
-            }
-
-            const cdSec = Math.max(0, buddhaPalmCooldown).toFixed(1);
-            const unlockStr = buddhaPalmReady ? '✅ 已解锁' : '🔒 未解锁';
-            let aimStr = '';
-            if (buddhaPalmState === 'SLAMMING') {
-                aimStr = '🖐 神掌释放中!';
-            } else if (buddhaPalmState === 'IDLE' && buddhaPalmCooldown > 0) {
-                aimStr = `⏳ 冷却 ${cdSec}秒`;
-            } else if (buddhaPalmReady) {
-                aimStr = '🟢 握柄释放';
-            }
-            const info = [
-                `🖐 如来神掌`,
-                `   ${unlockStr}`,
-                `   ${aimStr}`,
-            ].join('\n');
-
-            drawLeftDebugPanel(info);
-        }
-
-        // -------------------- 手柄模型 --------------------
-        const controllers = [];
-        let leftController, rightController;
-        let ak48Model = null;
-        let ak48Attached = false;
-        let ak48LeftAttached = false; // 左手枪支是否已附加
-        let leftGrip = null, rightGrip = null;
-
-        // 加载 AK48 枪支模型（Draco 压缩版本）
-        const dracoLoader = new DRACOLoader();
-        dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-        dracoLoader.setDecoderConfig({ type: 'js' });  // 强制使用 JS 解码器
-
-        const gltfLoader = new GLTFLoader();
-        gltfLoader.setDRACOLoader(dracoLoader);
-        gltfLoader.load(
-            'Model/Ak48.glb',
-            (gltf) => {
-                console.log('✅ Ak48.glb 加载成功');
-                ak48Model = gltf.scene;
-                ak48Model.scale.set(1, 1, 1);
-                ak48Model.traverse((child) => {
-                    if (child.isMesh) {
-                        child.castShadow = true;
-                        child.receiveShadow = true;
-                    }
-                });
-                attachAK48();
-                loadingResources.model = true;
-                checkAllLoaded();
-            },
-            (progress) => {
-                if (progress.total > 0) {
-                    const pct = (progress.loaded / progress.total * 100).toFixed(1);
-                    document.getElementById('loading').innerHTML = 
-                        '<div id="loading-spinner"></div><div>加载模型: ' + pct + '%</div>';
-                }
-            },
-            (error) => {
-                console.error('❌ 模型加载失败:', error);
-                loadingResources.model = true;
-                onResourceError('⚠️ 模型加载失败');
-            }
-        );
-
-        // ==================== 气球船模型配置 ====================
-        /*  气球船参数速查表（修改下方数值即可调整）
-            --------------------------------------------------
-            模型位置(世界坐标):       position.set(0, 0, -5)
-                                        X=0    左右（正=右，负=左）
-                                        Y=0    上下（正=上，负=下）
-                                        Z=-5   前后（正=后，负=前）
-            --------------------------------------------------
-            模型旋转(弧度):           rotation.set(0, 0, 0)
-                                        X=0    俯仰（绕X轴）
-                                        Y=0    偏航（绕Y轴）
-                                        Z=0    翻滚（绕Z轴）
-            --------------------------------------------------
-            模型缩放:                 SHIP_SCALE = 1.0
-                                        1.0 = 原始大小
-            --------------------------------------------------
-        */
-        const SHIP_SCALE = 7.0;           // <-- 气球船缩放
-        const SHIP_POS  = [1, 1, 0.05];     // <-- 气球船位置 [X, Y, Z]
-        const SHIP_ROT  = [0, 1.57, 0];      // <-- 气球船旋转 [X, Y, Z]（弧度）
-        let shipModel = null;
-
-        gltfLoader.load(
-            'Model/气球船.glb',
-            (gltf) => {
-                console.log('✅ 气球船.glb 加载成功');
-                shipModel = gltf.scene;
-                shipModel.scale.setScalar(SHIP_SCALE);
-                shipModel.position.set(...SHIP_POS);
-                shipModel.rotation.set(...SHIP_ROT);
-                shipModel.traverse((child) => {
-                    if (child.isMesh) {
-                        child.castShadow = true;
-                        child.receiveShadow = true;
-                    }
-                });
-                scene.add(shipModel);
-            },
-            (progress) => {
-                if (progress.total > 0) {
-                    console.log('气球船 加载: ' + (progress.loaded / progress.total * 100).toFixed(1) + '%');
-                }
-            },
-            (error) => {
-                console.warn('⚠️ 气球船.glb 未找到，跳过气球船模型');
-            }
-        );
-
-        // ==================== 骑士模型（第二波起出现在气球中）====================
-        let knightModel = null;
-        gltfLoader.load(
-            'Model/骑士.glb',
-            (gltf) => {
-                knightModel = gltf.scene;
-                console.log('✅ 骑士模型加载成功');
-            },
-            undefined,
-            () => console.warn('⚠️ 骑士模型未找到')
-        );
-
-        // ==================== 如来神掌配置区 ====================
-        /*  神掌参数速查表（修改下方数值即可调整）
-            --------------------------------------------------
-            解锁关卡:                    打完第 2 波后解锁（搜索 waveNumber >= 2）
-            --------------------------------------------------
-            左手装备缩放:                 0.5（搜索 attachBuddhaPalmToLeft）
-            左手装备位置:                 position.set(0, -0.08, 0.05)
-                                            X=0      左右偏移（正=右）
-                                            Y=-0.08  上下偏移（正=上）
-                                            Z=0.05   前后偏移（正=后）
-            左手装备旋转:                 rotation.set(0, 0, 0) 弧度（搜索 palm.rotation）
-            --------------------------------------------------
-            预览神掌缩放:                 2.0（搜索 previewPalm.scale）
-            释放神掌缩放:                 20.0（搜索 palm.scale.setScalar）
-            释放神掌碰撞半径:             10（搜索 killRadius）
-            释放神掌伤害:                 1000（搜索 damage: 1000）
-            --------------------------------------------------
-            神掌出现前方距离:             5 米（搜索 addScaledVector）
-            神掌出现高度(头顶上方):       15 米（搜索 palm.position.y += 15）
-            神掌下落时间:                 1.0 秒（搜索 fallDuration）
-            神掌落地后消失延迟:           0.5 秒（搜索 cleanupDelay）
-            瞄准超时(自动释放):           5 秒（搜索 AIM_TIMEOUT）
-            技能冷却:                     8 秒（搜索 BUDDHA_COOLDOWN）
-            --------------------------------------------------
-        */
-        let buddhaPalmModel = null;
-        let buddhaPalmReady = false;
-        let buddhaPalmAttached = false;
-        const BUDDHA_COOLDOWN = 8;       // <-- 技能冷却(秒)
-        let buddhaPalmCooldown = 0;
-        const buddhaPalmSkills = [];
-
-        // 状态机: IDLE → AIMING → SLAMMING → IDLE(冷却)
-        let buddhaPalmState = 'IDLE';
-        let buddhaPalmTimer = 0;
-        const AIM_TIMEOUT = 5;           // <-- 瞄准超时自动释放(秒)
-        let promptSprite = null;
-
-        function createPromptSprite() {
-            const canvas = document.createElement('canvas');
-            canvas.width = 512; canvas.height = 128;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = 'rgba(0,0,0,0.7)';
-            ctx.fillRect(0, 0, 512, 128);
-            ctx.fillStyle = '#ffd700';
-            ctx.font = 'bold 36px "Microsoft YaHei", sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('🖐️ 再按握柄释放如来神掌', 256, 55);
-            ctx.fillStyle = '#aaa';
-            ctx.font = '24px "Microsoft YaHei", sans-serif';
-            ctx.fillText('或 5 秒后自动释放', 256, 95);
-            const tex = new THREE.CanvasTexture(canvas);
-            const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false });
-            const s = new THREE.Sprite(mat);
-            s.scale.set(2, 0.5, 1);
-            s.visible = false;
-            return s;
-        }
-
-        gltfLoader.load(
-            'Model/如来神掌.glb',
-            (gltf) => {
-                buddhaPalmModel = gltf.scene;
-                console.log('✅ 如来神掌模型加载成功');
-            },
-            undefined,
-            () => console.warn('⚠️ 如来神掌模型未找到')
-        );
-
-        function attachBuddhaPalmToLeft() {
-            if (!buddhaPalmModel || !leftGrip || buddhaPalmAttached) return;
-            const palm = buddhaPalmModel.clone();
-            palm.scale.setScalar(0.2);             // <-- 左手神掌大小
-            palm.position.set(0, -0.08, 0.03);    // <-- 左手神掌位置(X,Y,Z)
-            palm.rotation.set(-90, 0, 0);              // <-- 左手神掌旋转(X,Y,Z)弧度
-            palm.traverse(c => { if (c.isMesh) c.castShadow = true; });
-            palm.userData = { isBuddhaPalm: true };
-            leftGrip.add(palm);
-            buddhaPalmAttached = true;
-            promptSprite = createPromptSprite();
-            promptSprite.position.set(0, 1.8, -1.5); // <-- 提示文字位置(X,Y,Z)
-            dolly.add(promptSprite);
-            console.log('🖐️ 如来神掌已装备到左手');
-        }
-
-        let previewPalm = null;
-        let aimDirection = new THREE.Vector3(); // 第一次按握柄时锁定的朝向
-
-        function enterAimingMode() {
-            buddhaPalmState = 'AIMING';
-            buddhaPalmTimer = AIM_TIMEOUT;
-            // 锁定当前玩家朝向
-            aimDirection.set(0, 0, -1).applyQuaternion(camera.quaternion);
-            aimDirection.y = 0; aimDirection.normalize();
-            // 前方生成预览神掌
-            if (buddhaPalmModel && !previewPalm) {
-                previewPalm = buddhaPalmModel.clone();
-                previewPalm.scale.setScalar(2.0);                 // <-- 预览神掌大小
-                previewPalm.rotation.set(-Math.PI / 2, 0, 0);
-                previewPalm.traverse(c => { if (c.isMesh) c.castShadow = true; });
-                previewPalm.userData = { isPreview: true };
-                dolly.add(previewPalm);
-            }
-            if (previewPalm) {
-                previewPalm.visible = true;
-                previewPalm.position.set(0, 0.5, -4);
-            }
-            // 倒计时数字已显示在左手腕UI，不再显示浮动提示框
-            console.log('🎯 瞄准：再按握柄释放，或' + AIM_TIMEOUT + '秒自动');
-        }
-
-        function releaseBuddhaPalm() {
-            if (!buddhaPalmModel) return;
-            if (promptSprite) promptSprite.visible = false;
-            if (previewPalm) { previewPalm.visible = false; }
-            buddhaPalmState = 'SLAMMING';
-            buddhaPalmCooldown = BUDDHA_COOLDOWN;
-
-            // 用第一次锁定的朝向生成 20x 神掌
-            const palm = buddhaPalmModel.clone();
-            palm.scale.setScalar(20.0);             // <-- 释放神掌大小(20倍)
-            palm.rotation.set(-Math.PI / 2, 0, 0); // <-- 掌心朝下
-            palm.traverse(c => { if (c.isMesh) c.castShadow = true; });
-            const camWorld = new THREE.Vector3();
-            camera.getWorldPosition(camWorld);
-            palm.position.copy(camWorld).addScaledVector(aimDirection, 3); // <-- 前方5米
-            palm.position.y += 20;                   // <-- 头顶上方15米
-            palm.userData = {
-                isBuddhaSkill: true,
-                elapsed: 0,
-                startY: palm.position.y,
-                targetY: camWorld.y,
-                fallDuration: 0.5,         // <-- 下落时间(秒)
-                killRadius: 10,            // <-- 碰撞半径(米)
-                damage: 1000               // <-- 伤害值
-            };
-            scene.add(palm);
-            buddhaPalmSkills.push(palm);
-            console.log('🖐 如来神掌释放！20x从' + palm.position.y.toFixed(1) + 'm落下');
-        }
-
-        function updateBuddhaPalmSkills(dt) {
-            if (buddhaPalmCooldown > 0) buddhaPalmCooldown -= dt;
-
-            // 瞄准倒计时（预览神掌跟随锁定方向）
-            if (buddhaPalmState === 'AIMING') {
-                buddhaPalmTimer -= dt;
-                if (previewPalm && previewPalm.visible) {
-                    const offset = aimDirection.clone().multiplyScalar(4);
-                    offset.y = 0.5;
-                    previewPalm.position.copy(offset);
-                }
-                if (buddhaPalmTimer <= 0) releaseBuddhaPalm();
-            }
-
-            // 神掌下落
-            for (let i = buddhaPalmSkills.length - 1; i >= 0; i--) {
-                const palm = buddhaPalmSkills[i];
-                const ud = palm.userData;
-                ud.elapsed += dt;
-
-                const t = Math.min(1, ud.elapsed / ud.fallDuration);
-                palm.position.y = ud.startY + (ud.targetY - ud.startY) * t;
-
-                if (t >= 1 && !ud.landed) {
-                    ud.landed = true;
-                    palm.position.y = ud.targetY;
-                    const pw = new THREE.Vector3(); palm.getWorldPosition(pw);
-                    let killed = 0;
-                    balloons.forEach(b => {
-                        if (!b.userData.active) return;
-                        if (b.position.distanceTo(pw) < ud.killRadius) {
-                            b.userData.hp -= ud.damage;
-                            if (b.userData.hp <= 0) {
-                                b.userData.active = false;
-                                if (b.userData.isKnight) { b.traverse(c => { if (c.isMesh) c.visible = false; }); playerStats.score += KNIGHT_SCORE; }
-                                else { b.visible = false; playerStats.score += BALLOON_SCORE; }
-                                killed++;
-                            }
-                        }
-                    });
-                    console.log('🖐 神掌击杀 ' + killed + '（20x, 半径10, 伤害1000）');
-                    spawnParticles(pw, 0xffdd44, 80);
-                    playBalloonPopSound();
-                    checkAllBalloonsDestroyed();
-                    ud.cleanupDelay = 0.3; // <-- 落地后0.5秒消失
-                }
-
-                if (ud.cleanupDelay !== undefined) {
-                    ud.cleanupDelay -= dt;
-                    if (ud.cleanupDelay <= 0) {
-                        palm.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
-                        scene.remove(palm);
-                        buddhaPalmSkills.splice(i, 1);
-                        buddhaPalmState = 'IDLE';
-                    }
-                }
-            }
-        }
-
-        function createControllerModel(isRight) {
-            const group = new THREE.Group();
-
-            // 激光已移除，手柄模型为空（AK48 枪支在 attachAK48 中单独附加）
-
-            return group;
-        }
-
-        function setupController(idx) {
-            const controller = renderer.xr.getController(idx);
-            const grip = renderer.xr.getControllerGrip(idx);
-            const model = createControllerModel(idx === 1);
-            grip.add(model);
-            dolly.add(controller);
-            dolly.add(grip);
-            controllers.push(controller);
-            
-            if (idx === 1) {
-                rightGrip = grip;
-                attachAK48();
-                // 玩家状态面板挂到右手腕
-                const panel = createDebugPanel();
-                grip.add(panel);
-            } else {
-                leftGrip = grip;
-                const leftPanel = createLeftDebugPanel();
-                grip.add(leftPanel);
-            }
-            
-            if (idx === 0) leftController = controller;
-            else rightController = controller;
-        }
-
-        // ==================== AK48 枪支配置区 ====================
-        /*  枪支参数速查表（修改下方数值即可调整）
-            --------------------------------------------------
-            枪支整体缩放:                  AK48_SCALE = 0.6
-                                           1.0 = 原始大小，0.6 = 60%
-            --------------------------------------------------
-            枪支位置(相对于右手柄):        position.set(0, -0.1, 0.01)
-                                           X=0       左右偏移（正=右，负=左）
-                                           Y=-0.1    上下偏移（正=上，负=下）
-                                           Z=0.01    前后偏移（正=后，负=前）
-            --------------------------------------------------
-            枪支角度(相对于右手柄):        rotation.x = -20
-                                           rotation.y = Math.PI / 2 (即90度)
-                                           rotation.z = 0 (未设置，默认0)
-                                           注意：rotation.x = -20 是弧度值
-                                           如需角度制：-20 * Math.PI / 180 ≈ -0.349 弧度
-            --------------------------------------------------
-        */
-        const AK48_SCALE = 0.6;   // <-- 调整枪支整体大小
-
-        // 附加 AK48 到右手柄
-        function attachAK48() {
-            console.log('attachAK48 被调用', { 
-                hasModel: !!ak48Model, 
-                hasRightGrip: !!rightGrip, 
-                alreadyAttached: ak48Attached 
-            });
-            
-            if (!ak48Model) { console.log('AK48 模型尚未加载，跳过'); return; }
-            if (!rightGrip) { console.log('右手柄尚未初始化，跳过'); return; }
-            if (ak48Attached) { console.log('AK48 已附加，跳过'); return; }
-            
-            const gunInstance = ak48Model.clone();
-            
-            // 计算原始尺寸并应用缩放
-            const box = new THREE.Box3().setFromObject(gunInstance);
-            const size = new THREE.Vector3();
-            box.getSize(size);
-            console.log('AK48 原始尺寸:', size.x.toFixed(3), size.y.toFixed(3), size.z.toFixed(3));
-            console.log('AK48 当前缩放值:', AK48_SCALE, '→ 缩放后长度约:', (Math.max(size.x, size.y, size.z) * AK48_SCALE).toFixed(3), '米');
-            
-            gunInstance.scale.set(AK48_SCALE, AK48_SCALE, AK48_SCALE);
-            
-            gunInstance.traverse((child) => {
-                if (child.isMesh) child.castShadow = true;
-            });
-            
-            // ==================== 枪支位置和角度微调区 ====================
-            // 修改以下三行来调整枪在手柄上的位置和朝向
-            gunInstance.position.set(0, -0.1, 0.01);  // <-- 位置 XYZ（米）
-            gunInstance.rotation.x = -20;             // <-- X轴旋转（当前为-20弧度，约-1146度）
-            gunInstance.rotation.y = Math.PI / 2;     // <-- Y轴旋转 90度（枪管朝前）
-            
-            rightGrip.add(gunInstance);
-            ak48Attached = true;
-            console.log('AK48 已成功附加到右手柄');
-        }
-
-        // 附加 AK48 到左手柄
-        function attachAK48ToLeft() {
-            console.log('attachAK48ToLeft 被调用', { 
-                hasModel: !!ak48Model, 
-                hasLeftGrip: !!leftGrip, 
-                alreadyAttached: ak48LeftAttached 
-            });
-            
-            if (!ak48Model) { console.log('AK48 模型尚未加载，跳过左手附加'); return; }
-            if (!leftGrip) { console.log('左手柄尚未初始化，跳过'); return; }
-            if (ak48LeftAttached) { console.log('AK48 已附加到左手，跳过'); return; }
-            
-            const gunInstance = ak48Model.clone();
-            
-            // 计算原始尺寸并应用缩放
-            const box = new THREE.Box3().setFromObject(gunInstance);
-            const size = new THREE.Vector3();
-            box.getSize(size);
-            console.log('AK48 左手原始尺寸:', size.x.toFixed(3), size.y.toFixed(3), size.z.toFixed(3));
-            
-            gunInstance.scale.set(AK48_SCALE, AK48_SCALE, AK48_SCALE);
-            
-            gunInstance.traverse((child) => {
-                if (child.isMesh) child.castShadow = true;
-            });
-            
-            // ============================================================
-            // 左手枪支 位置 / 旋转 / 缩放 调节区
-            // ============================================================
-            // position.set(X, Y, Z)
-            //   X:  左右偏移（正 = 右，负 = 左）
-            //   Y:  上下偏移（正 = 上，负 = 下）  当前: -0.1（向下）
-            //   Z:  前后偏移（正 = 后，负 = 前）  当前:  0.01（略偏后）
-            gunInstance.position.set(0, -0.1, 0.01);
-
-            // rotation.x  绕 X 轴旋转（枪管俯仰，负 = 枪口朝下）
-            //   当前值 -20 是弧度（约 -1146°，Three.js 内部自动折算）
-            //   如果想用角度：改为 -20 * Math.PI / 180 ≈ -0.349
-            gunInstance.rotation.x = -20;
-
-            // rotation.y  绕 Y 轴旋转（枪管左右）
-            //   Math.PI / 2 = 90°  枪口朝正前方
-            //   如枪口还是朝后，改为 -Math.PI / 2 或 Math.PI * 1.5 试试
-            gunInstance.rotation.y = -90*Math.PI / 180;
-
-            // scale  X 为负 = 镜像翻转（左手持枪关键，与右手对称）
-            //   如枪支整体上下颠倒，把 Y 也改为 -AK48_SCALE
-            //   如整体前后反转，把 Z 也改为 -AK48_SCALE
-            gunInstance.scale.x = -AK48_SCALE; // ← 镜像翻转（左手用）
-            gunInstance.scale.y = AK48_SCALE;
-            gunInstance.scale.z = AK48_SCALE;
-            // ============================================================
-            
-            leftGrip.add(gunInstance);
-            ak48LeftAttached = true;
-            console.log('AK48 已成功附加到左手柄');
-        }
-
-        renderer.xr.addEventListener('sessionstart', () => {
-            setShadow(false); // VR 模式关闭阴影
-            setTimeout(() => { attachAK48(); }, 100);
-            // 如果启用左手持枪模式，为左手柄也添加枪支
-            if (leftHandGunEnabled) {
-                setTimeout(() => { attachAK48ToLeft(); }, 100);
-            }
-            // VR开始时生成气球
-            setTimeout(() => {
-                if (!gameStarted) {
-                    gameStarted = true;
-                    gameOverState = false;
-                    shipHp = SHIP_MAX_HP;
-                    shipHitFlash = 0;
-                    spawnBalloons();
-                    console.log('🎈 气球战斗开始！船HP:', shipHp);
-                }
-            }, 500);
-        });
-
-        // -------------------- 输入处理 --------------------
-        let rightTrigger = false;
-        let leftTrigger = false; // 左手扳机状态
-        let lastRightShootTime = 0;
-        let lastLeftShootTime = 0;
-
-        function updateInputs() {
-            const session = renderer.xr.getSession();
-            if (!session) return;
-            rightInput.stickX = 0; rightInput.stickY = 0;
-            leftInput.stickX = 0; leftInput.stickY = 0;
-            rightTrigger = false;
-            leftTrigger = false; // 重置左手扳机状态
-            // 重置按键状态
-            Object.keys(leftBtnState).forEach(k => leftBtnState[k] = false);
-            Object.keys(rightBtnState).forEach(k => rightBtnState[k] = false);
-
-            if (!session.inputSources) return;
-            for (const source of session.inputSources) {
-                if (!source.gamepad) continue;
-                const gp = source.gamepad;
-                const hand = source.handedness;
-                let sx = 0, sy = 0;
-                if (gp.axes.length >= 4) { sx = gp.axes[2]; sy = gp.axes[3]; }
-                else if (gp.axes.length >= 2) { sx = gp.axes[0]; sy = gp.axes[1]; }
-
-                const triggerVal = gp.buttons[0]?.value || 0;
-                const trigger = triggerVal > 0.5;
-                const grip = gp.buttons[1]?.pressed || false;
-                const stickBtn = gp.buttons[3]?.pressed || false;
-
-                if (hand === 'right') {
-                    rightInput.stickX = sx; rightInput.stickY = sy;
-                    rightTrigger = trigger;
-                    rightBtnState.trigger = trigger;
-                    rightBtnState.grip = grip;
-                    rightBtnState.stickBtn = stickBtn;
-                    rightBtnState.btnA = gp.buttons[4]?.pressed || false;
-                    rightBtnState.btnB = gp.buttons[5]?.pressed || false;
-                } else if (hand === 'left') {
-                    leftInput.stickX = sx; leftInput.stickY = sy;
-                    leftTrigger = trigger; // 更新左手扳机状态
-                    leftBtnState.trigger = trigger;
-                    leftBtnState.grip = grip;
-                    leftBtnState.stickBtn = stickBtn;
-                    leftBtnState.btnX = gp.buttons[4]?.pressed || false;
-                    leftBtnState.btnY = gp.buttons[5]?.pressed || false;
-                }
-            }
-        }
-
-        function handleShooting() {
-            const now = performance.now();
-            
-            // 右手射击（独立冷却）
-            if (rightController && rightTrigger) {
-                if (now - lastRightShootTime > SHOOT_COOLDOWN) {
-                    shootBullet(rightController);
-                    lastRightShootTime = now;
-                }
-            }
-            
-            // 左手射击（如果启用左手持枪模式，独立冷却）
-            if (leftHandGunEnabled && leftController && leftTrigger) {
-                if (now - lastLeftShootTime > SHOOT_COOLDOWN) {
-                    shootBullet(leftController);
-                    lastLeftShootTime = now;
-                }
-            }
-        }
-
-        // ==================== 移动范围限制 4×8 ====================
-        const BOUND_X = 2, BOUND_Z = 4; // X: ±2(宽4)  Z: ±4(深8)
-
-        function handleMovement(dt) {
-            let sx = rightInput.stickX, sy = rightInput.stickY;
-            if (Math.abs(sx) < DEADZONE && Math.abs(sy) < DEADZONE) {
-                sx = leftInput.stickX; sy = leftInput.stickY;
-            }
-            if (Math.abs(sx) < DEADZONE && Math.abs(sy) < DEADZONE) {
-                return;
-            }
-
-            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-            forward.y = 0; forward.normalize();
-            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-            right.y = 0; right.normalize();
-
-            // 直接移动 dolly（真实移动，世界物体自然相对运动）
-            const speed = MOVE_SPEED * dt;
-            sy = -sy; // PICO 摇杆前推为负，取反
-            const dx = (forward.x * sy + right.x * sx) * speed;
-            const dz = (forward.z * sy + right.z * sx) * speed;
-            const nx = dolly.position.x + dx;
-            const nz = dolly.position.z + dz;
-
-            dolly.position.x = Math.max(-BOUND_X, Math.min(BOUND_X, nx));
-            dolly.position.z = Math.max(-BOUND_Z, Math.min(BOUND_Z, nz));
-        }
-
-        function handleExit() {
-            const session = renderer.xr.getSession();
-            if (!session) return;
-            if (!session.inputSources) return;
-            for (const src of session.inputSources) {
-                if (!src.gamepad) continue;
-                if (src.handedness === 'right') {
-                    const btnA = src.gamepad.buttons[4]?.pressed;
-                    const btnB = src.gamepad.buttons[5]?.pressed;
-                    if (btnA || btnB) { session.end(); break; }
-                }
-            }
-        }
-
-        // -------------------- 动画循环 --------------------
+        // 动画循环
         const clock = new THREE.Clock();
-        const tempPos = new THREE.Vector3();
-
-        function updateCloudLayers(dt) { /* 已废弃 — dolly 真实移动替代云海滚动 */ }
-
-        let gameStarted = false;
-        let waveNumber = 0;          // 波次计数（第0波=初始10个，之后每波出骑士）
-        let leftHandGunEnabled = false; // 是否启用左手持枪模式
-        let gameOverState = false;   // 游戏结束状态
-
-        // 游戏结束处理 —— 死亡后重开当前关卡
-        function gameOver() {
-            if (gameOverState) return;
-            gameOverState = true;
-            console.log('💀 气球船被摧毁！即将重开当前关卡...');
-
-            // 清除所有活跃气球
-            balloons.forEach(b => {
-                b.userData.active = false;
-                b.visible = false;
-                if (b.userData.isKnight) {
-                    b.traverse(c => { if (c.isMesh) c.visible = false; });
-                }
-            });
-
-            // 1.5秒后重开当前关卡
-            setTimeout(() => {
-                restartLevel();
-            }, 1500);
-        }
-
-        // 重开当前关卡（保留波次，恢复船血，赠送抽卡）
-        function restartLevel() {
-            console.log('🔄 重开第' + waveNumber + '波，船血恢复满');
-
-            // 恢复船血
-            shipHp = SHIP_MAX_HP;
-            shipHitFlash = 0;
-            gameOverState = false;
-
-            // 清除所有气球
-            balloons.forEach(b => disposeBalloon(b));
-            balloons.length = 0;
-
-            // 重置波次生成状态
-            waveSpawnRemaining = 0;
-            waveSpawned = 0;
-            wavePhaseTimer = 0;
-            wavePhase = 0;
-            spawnBatchTimer = 0;
-
-            // 赠送一次抽卡
-            setTimeout(() => {
-                spawnChoiceCards();
-                console.log('🎁 死亡补偿：赠送一次抽卡机会');
-            }, 500);
-        }
-
         function animate() {
             const dt = Math.min(clock.getDelta(), 0.1);
-
-            // 天空过渡（VR/非VR 都持续更新）
-            updateSkyTransition(dt);
-            updateBuddhaPalmSkills(dt);     // 神掌动画（非VR也要跑）
-
-            if (renderer.xr.isPresenting) {
-                // 游戏结束时不更新输入和移动，只渲染
-                if (!gameOverState) {
-                    updateInputs();
-                    handleMovement(dt);
-                    handleShooting();
-                    updateBullets(dt);
-                    updateBalloons(dt);
-                    updateWaveSpawning(dt);
-                    checkBulletBalloonCollisions();
-                    checkLeftHandChoiceCardCollision();
-                    handleExit();
-                    checkVRSkySwitch();
-                    checkBuddhaPalmTrigger();      // 必须在 updateInputs 之后
-                }
-                // 碎片和粒子始终更新（即使游戏结束也要播完）
-                updateDebris(dt);
-                updateParticles(dt);
-                // 调试面板每5帧更新一次（游戏结束也继续更新显示最终状态）
-                if (!animate._frameCount) animate._frameCount = 0;
-                animate._frameCount++;
-                if (animate._frameCount % 5 === 0) {
-                    updateDebugPanel();
-                    updateLeftDebugPanel();
-                }
-                vrEntryEl.style.display = 'none';
-                vrHintsEl.style.display = 'none';
-            } else {
-                vrEntryEl.style.display = 'block';
-                vrHintsEl.style.display = 'flex';
+            // 帧计数器 + 心跳日志（每 60 帧 ~1秒一次）
+            if (!animate._frameCount) animate._frameCount = 0;
+            animate._frameCount++;
+            if (animate._frameCount % 60 === 1) {
+                const xrState = renderer.xr.isPresenting ? 'VR中' : '非VR';
+                window.__log('❤️ 帧#' + animate._frameCount + ' / XR:' + xrState + ' / dt:' + dt.toFixed(4) + ' / grip L:' + STATE.leftBtnState.grip + ' R:' + STATE.rightBtnState.grip, 'i');
             }
+            try {
+                updateSkyTransition(dt);
+                game.updateBuddhaPalmSkills(dt);
 
-            renderer.render(scene, camera);
+                if (renderer.xr.isPresenting) {
+                    if (!STATE.gameOverState) {
+                        vr.updateInputs();
+                        vr.handleMovement(dt);
+                        vr.handleShooting();
+                        game.updateBullets(dt);
+                        game.updateBalloons(dt);
+                        game.updateWaveSpawning(dt);
+                        game.checkBulletBalloonCollisions();
+                        game.checkLeftHandChoiceCardCollision();
+                        vr.handleExit();
+                        game.checkVRSkySwitch();
+                        game.checkBuddhaPalmTrigger();
+                    }
+                    game.updateDebris(dt);
+                    game.updateParticles(dt);
+                    if (!animate._frameCount) animate._frameCount = 0;
+                    animate._frameCount++;
+                    if (animate._frameCount % 5 === 0) {
+                        vr.updateDebugPanel();
+                        vr.updateLeftDebugPanel();
+                    }
+                    vrEntryEl.style.display = 'none';
+                    vrHintsEl.style.display = 'none';
+                } else {
+                    vrEntryEl.style.display = 'block';
+                    vrHintsEl.style.display = 'flex';
+                }
+            } catch (e) {
+                console.error('Animate error:', e);
+                window.__log('Animate 错误: ' + e.message, 'e');
+                statusMsgEl.innerHTML = '❌ ' + e.message;
+                statusMsgEl.classList.add('error');
+                statusMsgEl.style.display = 'block';
+            }
+            try {
+                renderer.render(scene, camera);
+            } catch (e) {
+                window.__log('Render 调用失败: ' + e.message, 'e');
+                console.error('Render error:', e);
+            }
         }
         renderer.setAnimationLoop(animate);
 
-        // -------------------- 初始化 --------------------
-        async function initScene() {
-            setupController(0);
-            setupController(1);
-
-            // 进入 VR 核心函数
-            async function enterVR(isLeftHandMode = false) {
-                if (enterVRBtn.disabled) return;
-                enterVRBtn.disabled = true;
-                enterVRLeftHandBtn.disabled = true;
-                enterVRBtn.textContent = '⏳ 启动中...';
-                enterVRLeftHandBtn.textContent = '⏳ 启动中...';
-                try {
-                    if (!navigator.xr) {
-                        throw new Error('浏览器不支持 WebXR');
-                    }
-                    
-                    let session;
-                    try {
-                        if (navigator.xr.isSessionSupported) {
-                            const supported = await navigator.xr.isSessionSupported('immersive-vr');
-                            if (!supported) throw new Error('设备不支持VR');
-                        }
-                        session = await navigator.xr.requestSession('immersive-vr', {
-                            requiredFeatures: ['local-floor']
-                        });
-                    } catch (e) {
-                        console.log('使用 PICO 兼容模式:', e.message);
-                        session = await navigator.xr.requestSession('immersive-vr');
-                    }
-                    
-                    // 根据模式设置左手持枪状态
-                    leftHandGunEnabled = isLeftHandMode;
-                    console.log('🎮 左手持枪模式:', leftHandGunEnabled ? '已启用' : '未启用');
-                    
-                    renderer.xr.setSession(session);
-                    enterVRBtn.disabled = false;
-                    enterVRLeftHandBtn.disabled = false;
-                    enterVRBtn.textContent = '🎈 正常开始游戏';
-                    enterVRLeftHandBtn.textContent = '🔫 左手持枪模式';
-                } catch (err) {
-                    statusMsgEl.innerHTML = '❌ ' + err.message;
-                    statusMsgEl.classList.add('error');
-                    enterVRBtn.disabled = false;
-                    enterVRLeftHandBtn.disabled = false;
-                    enterVRBtn.textContent = '🎈 正常开始游戏';
-                    enterVRLeftHandBtn.textContent = '🔫 左手持枪模式';
-                }
+        // 初始化
+        function initScene() {
+            try {
+                vr.setupController(0);
+                vr.setupController(1);
+            } catch (e) {
+                console.error('Init error:', e);
+                statusMsgEl.innerHTML = '❌ 初始化错误: ' + e.message;
+                statusMsgEl.classList.add('error');
             }
-
-            // 正常开始游戏按钮
-            enterVRBtn.onclick = () => enterVR(false);
-            // 左手持枪模式按钮
-            enterVRLeftHandBtn.onclick = () => enterVR(true);
-            
-            // 点击页面任意位置也能进入 VR（默认正常模式）
-            // document.body.onclick = () => enterVR(false);
-            // document.body.ontouchstart = () => enterVR(false);
-
-            renderer.xr.addEventListener('sessionend', () => {
-                setShadow(true); // 退出 VR 恢复阴影
-                enterVRBtn.disabled = false;
-                enterVRLeftHandBtn.disabled = false;
-                vrEntryEl.style.display = 'block';
-                vrHintsEl.style.display = 'flex';
-                statusMsgEl.style.display = 'none';
-                // 重置游戏状态（下次进入 VR 重新开始）
-                gameStarted = false;
-                waveNumber = 0;
-                gameOverState = false;
-                shipHp = SHIP_MAX_HP;
-                shipHitFlash = 0;
-                buddhaPalmReady = false;
-                buddhaPalmAttached = false;
-                buddhaPalmCooldown = 0;
-                leftHandGunEnabled = false;
-                ak48Attached = false;
-                ak48LeftAttached = false;
-                choiceCardsActive = false;
-                if (choiceCardTimeout) { clearTimeout(choiceCardTimeout); choiceCardTimeout = null; }
-                // 清除飞行中的神掌
-                buddhaPalmSkills.forEach(p => {
-                    p.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
-                    scene.remove(p);
-                });
-                buddhaPalmSkills.length = 0;
-                // 清除选择卡
-                while (choiceCardGroup.children.length > 0) {
-                    const child = choiceCardGroup.children[0];
-                    if (child.material && child.material.map) child.material.map.dispose();
-                    if (child.material) child.material.dispose();
-                    if (child.geometry) child.geometry.dispose();
-                    choiceCardGroup.remove(child);
-                }
-            });
-
-            window.addEventListener('resize', () => {
-                camera.aspect = window.innerWidth / window.innerHeight;
-                camera.updateProjectionMatrix();
-                renderer.setSize(window.innerWidth, window.innerHeight);
-            });
-
-            // 页面卸载时清理资源
-            window.addEventListener('beforeunload', () => {
-                renderer.dispose();
-                scene.traverse(obj => {
-                    if (obj.geometry) obj.geometry.dispose();
-                    if (obj.material) {
-                        if (Array.isArray(obj.material)) {
-                            obj.material.forEach(m => m.dispose());
-                        } else {
-                            obj.material.dispose();
-                        }
-                    }
-                });
-                cloudLayers.forEach(layer => {
-                    if (layer.userData.texture) layer.userData.texture.dispose();
-                    if (layer.material) layer.material.dispose();
-                    if (layer.geometry) layer.geometry.dispose();
-                });
-                dracoLoader.dispose();
-            });
         }
 
+        renderer.xr.addEventListener('sessionstart', () => {
+            window.__log('sessionstart 事件触发', 's');
+            setShadow(false);
+            setTimeout(() => vr.attachAK48(), 100);
+            if (STATE.leftHandGunEnabled) {
+                setTimeout(() => vr.attachAK48ToLeft(), 100);
+            }
+            setTimeout(() => {
+                if (!STATE.gameStarted) {
+                    STATE.gameStarted = true;
+                    STATE.gameOverState = false;
+                    STATE.shipHp = 100;
+                    STATE.shipHitFlash = 0;
+                    game.spawnBalloons();
+                    window.__log('游戏开始 / 气球生成', 's');
+                }
+            }, 500);
+        });
+
+        renderer.xr.addEventListener('sessionend', () => {
+            window.__log('sessionend 事件触发', 'w');
+            setShadow(true);
+            enterVRBtn.disabled = false;
+            enterVRLeftHandBtn.disabled = false;
+            vrEntryEl.style.display = 'block';
+            vrHintsEl.style.display = 'flex';
+            statusMsgEl.style.display = 'none';
+            STATE.gameStarted = false;
+            STATE.waveNumber = 0;
+            STATE.gameOverState = false;
+            STATE.shipHp = 100;
+            STATE.shipHitFlash = 0;
+            STATE.buddhaPalmReady = false;
+            STATE.buddhaPalmAttached = false;
+            STATE.buddhaPalmCooldown = 0;
+            STATE.leftHandGunEnabled = false;
+            STATE.ak48Attached = false;
+            STATE.ak48LeftAttached = false;
+            STATE.choiceCardsActive = false;
+            if (STATE.choiceCardTimeout) { clearTimeout(STATE.choiceCardTimeout); STATE.choiceCardTimeout = null; }
+            game.buddhaPalmSkills.forEach(p => {
+                p.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
+                scene.remove(p);
+            });
+            game.buddhaPalmSkills.length = 0;
+            // 清除选择卡
+            while (choiceCardGroup.children.length > 0) {
+                const child = choiceCardGroup.children[0];
+                if (child.material && child.material.map) child.material.map.dispose();
+                if (child.material) child.material.dispose();
+                if (child.geometry) child.geometry.dispose();
+                choiceCardGroup.remove(child);
+            }
+        });
+
+        window.addEventListener('beforeunload', () => {
+            renderer.dispose();
+            scene.traverse(obj => {
+                if (obj.geometry) obj.geometry.dispose();
+                if (obj.material) {
+                    if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+                    else obj.material.dispose();
+                }
+            });
+        });
+
         initScene();
+        window.__log('initScene() 完成', 's');
+
+        // ===== 日志面板更新 =====
+        let _lastLogRender = 0;
+        function renderLogPanel() {
+            const buf = window.__logBuffer || [];
+            if (buf.length === 0) return;
+            const now = Date.now();
+            const newEntries = buf.slice(_lastLogRender);
+            _lastLogRender = buf.length;
+            let html = '';
+            // 始终从最近的 200 条显示
+            const start = Math.max(0, buf.length - 200);
+            for (let i = start; i < buf.length; i++) {
+                const e = buf[i];
+                const t = new Date(e.time);
+                const ts = t.toTimeString().slice(0, 8);
+                html += `<span class="log-time">[${ts}]</span> <span class="log-${e.level}">${e.msg}</span>\n`;
+            }
+            logPanel.innerHTML = html;
+            logPanel.scrollTop = logPanel.scrollHeight;
+        }
+
+        // 独立于 Three.js 循环的日志刷新（每 200ms）
+        setInterval(renderLogPanel, 200);
+        // 同时也在 animate 中触发
+        window.__animateLogFlag = function() { renderLogPanel(); };
     </script>
 </body>
 </html>
