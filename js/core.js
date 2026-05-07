@@ -57,7 +57,7 @@ export const SHIP_COLLISION_RADIUS = 2.5;
 export const BALLOON_REPEL_FORCE = 3.0;
 export const SHIP_REPEL_FORCE = 2.0;
 
-export const CHOICE_CARD_DISTANCE = 1.5;
+export const CHOICE_CARD_DISTANCE = 0.75;
 
 export const BUDDHA_COOLDOWN = 8;
 export const AIM_TIMEOUT = 5;
@@ -87,13 +87,21 @@ export const STATE = {
     shipHp: SHIP_MAX_HP,
     shipHitFlash: 0,
 
-    playerStats: { hp: 100, score: 50, atk: 30 },
+    playerStats: { hp: 100, score: 50, atk: 30, gold: 0 },
+    fireRate: 1.0,
+    multiShotChance: 0,
+    explosionRadius: 0,
+    cooldownReduction: 0,
+    skillName: '如来神掌',
 
     choiceCardsActive: false,
-    extraBulletEnabled: false,
+    choiceRefreshCount: 0,
+    choiceRefreshCooldown: 0,
     selectedCardIndex: -1,
     cardHighlightTime: 0,
     choiceCardTimeout: null,
+
+    prevLeftTrigger: false,
 
     buddhaPalmReady: false,
     buddhaPalmAttached: false,

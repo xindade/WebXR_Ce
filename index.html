@@ -326,6 +326,7 @@
             STATE.ak48Attached = false;
             STATE.ak48LeftAttached = false;
             STATE.choiceCardsActive = false;
+            STATE.choiceRefreshCount = 0;
             if (STATE.choiceCardTimeout) { clearTimeout(STATE.choiceCardTimeout); STATE.choiceCardTimeout = null; }
             game.buddhaPalmSkills.forEach(p => {
                 p.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });

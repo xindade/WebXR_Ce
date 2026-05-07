@@ -5,10 +5,10 @@ import {
     renderer, scene, dolly, camera, STATE,
     SHOOT_COOLDOWN, MOVE_SPEED, DEADZONE, BOUND_X, BOUND_Z,
     AK48_SCALE, SHIP_SCALE, SHIP_POS, SHIP_ROT,
-    SPAWN_MAX_ACTIVE, BUDDHA_COOLDOWN,
+    SPAWN_MAX_ACTIVE, BUDDHA_COOLDOWN, SHIP_MAX_HP,
     roundRect
 } from './core.js';
-import { shootBullet, balloons } from './game.js';
+import { shootBullet } from './game.js';
 
 if (window.__log) window.__log('vr.js 模块加载完成', 's');
 
@@ -298,8 +298,9 @@ export function updateInputs() {
 
 export function handleShooting() {
     const now = performance.now();
+    const cooldown = SHOOT_COOLDOWN / Math.max(0.1, STATE.fireRate);
     if (STATE.rightController && STATE.rightTrigger) {
-        if (now - STATE.lastRightShootTime > SHOOT_COOLDOWN) {
+        if (now - STATE.lastRightShootTime > cooldown) {
             initAudio();
             playShootSound();
             shootBullet(STATE.rightController);
@@ -307,7 +308,7 @@ export function handleShooting() {
         }
     }
     if (STATE.leftHandGunEnabled && STATE.leftController && STATE.leftTrigger) {
-        if (now - STATE.lastLeftShootTime > SHOOT_COOLDOWN) {
+        if (now - STATE.lastLeftShootTime > cooldown) {
             initAudio();
             playShootSound();
             shootBullet(STATE.leftController);
@@ -368,22 +369,17 @@ function createDebugPanel() {
     return debugPanel;
 }
 
-function drawDebugPanel(info, hpColor) {
+function drawDebugPanel(info) {
     if (!debugCtx) return;
     const c = debugCtx, w = debugCanvas.width, h = debugCanvas.height;
     c.clearRect(0, 0, w, h);
-    if (STATE.shipHitFlash > 0) {
-        c.fillStyle = `rgba(255,0,0,${STATE.shipHitFlash * 0.5})`;
-        c.fillRect(0, 0, w, h);
-        STATE.shipHitFlash = Math.max(0, STATE.shipHitFlash - 0.016);
-    }
     c.fillStyle = 'rgba(0,0,0,0.82)';
     roundRect(c, 0, 0, w, h, 24); c.fill();
     c.strokeStyle = '#00ffcc'; c.lineWidth = 4;
     roundRect(c, 2, 2, w - 4, h - 4, 22); c.stroke();
-    c.fillStyle = hpColor || '#ff3333';
+    c.fillStyle = '#00ffcc';
     c.font = 'bold 28px monospace';
-    c.fillText('🚢 气球船状态', 18, 42);
+    c.fillText('⚔️ 战斗属性', 18, 42);
     c.fillStyle = '#ffffff';
     c.font = '22px monospace';
     info.split('\n').forEach((line, i) => c.fillText(line, 18, 80 + i * 30));
@@ -392,20 +388,16 @@ function drawDebugPanel(info, hpColor) {
 
 export function updateDebugPanel() {
     if (!debugPanel) return;
-    const activeBalloons = balloons.filter(b => b.userData.active).length;
-    const extraBulletStr = STATE.extraBulletEnabled ? '✅' : '❌';
-    const phaseNames = ['', '前', '前+左右', '全方向'];
-    const phaseStr = STATE.wavePhase > 0 ? `阶段${phaseNames[STATE.wavePhase]}` : '';
-    const hpColor = STATE.shipHp > 50 ? '#ff3333' : STATE.shipHp > 20 ? '#ffaa00' : '#ff0000';
+    const multiPct = STATE.multiShotChance + '%';
+    const radiusStr = STATE.explosionRadius > 0 ? STATE.explosionRadius + 'm' : '0';
     const info = [
-        `🚢 船血  ${STATE.shipHp}/${100}`,
-        `🎯 得分  ${STATE.playerStats.score}`,
         `⚔️ 攻击  ${STATE.playerStats.atk}`,
-        `🎈 气球  ${activeBalloons}/${SPAWN_MAX_ACTIVE} 剩${STATE.waveSpawnRemaining}`,
-        `🔫 双弹  ${extraBulletStr}`,
-        `🌊 波次${STATE.waveNumber} ${phaseStr}`
+        `🎯 射速  ${STATE.fireRate.toFixed(1)}x`,
+        `🔫 多重  ${multiPct}`,
+        `💥 范围  ${radiusStr}`,
+        `🏆 得分  ${STATE.playerStats.score}`
     ].join('\n');
-    drawDebugPanel(info, hpColor);
+    drawDebugPanel(info);
 }
 
 let leftDebugPanel = null, leftDebugCanvas = null, leftDebugCtx = null, leftDebugTexture = null;
@@ -435,6 +427,7 @@ function drawLeftDebugPanel(info, countdown) {
     c.strokeStyle = '#ff6600'; c.lineWidth = 4;
     roundRect(c, 2, 2, w - 4, h - 4, 22); c.stroke();
 
+    // AIMING 模式：显示大倒计时数字
     if (typeof countdown === 'number') {
         const numStr = String(Math.max(0, Math.ceil(countdown)));
         const fontSize = 180;
@@ -452,9 +445,9 @@ function drawLeftDebugPanel(info, countdown) {
         return;
     }
 
-    c.fillStyle = '#00ccff';
+    c.fillStyle = '#ff6600';
     c.font = 'bold 28px monospace';
-    c.fillText('🎮 手柄按键', 18, 42);
+    c.fillText('🚢 飞船状态', 18, 42);
     c.fillStyle = '#ffffff';
     c.font = '22px monospace';
     info.split('\n').forEach((line, i) => c.fillText(line, 18, 80 + i * 30));
@@ -463,17 +456,35 @@ function drawLeftDebugPanel(info, countdown) {
 
 export function updateLeftDebugPanel() {
     if (!leftDebugPanel) return;
+    // AIMING 模式：显示大倒计时
     if (STATE.buddhaPalmState === 'AIMING') {
         drawLeftDebugPanel('', STATE.buddhaPalmTimer);
         return;
     }
-    const cdSec = Math.max(0, STATE.buddhaPalmCooldown).toFixed(1);
-    const unlockStr = STATE.buddhaPalmReady ? '✅ 已解锁' : '🔒 未解锁';
-    let aimStr = '';
-    if (STATE.buddhaPalmState === 'SLAMMING') aimStr = '🖐 神掌释放中!';
-    else if (STATE.buddhaPalmState === 'IDLE' && STATE.buddhaPalmCooldown > 0) aimStr = `⏳ 冷却 ${cdSec}秒`;
-    else if (STATE.buddhaPalmReady) aimStr = '🟢 握柄释放';
-    const info = [`🖐 如来神掌`, `   ${unlockStr}`, `   ${aimStr}`].join('\n');
+    // 选项卡刷新提示
+    if (STATE.choiceCardsActive) {
+        const cdLeft = Math.max(0, STATE.choiceRefreshCooldown).toFixed(1);
+        const fee = 10 * Math.pow(2, STATE.choiceRefreshCount);
+        const cooldownStr = STATE.choiceRefreshCooldown > 0 ? ` 冷却${cdLeft}s` : '';
+        const info = [
+            `🎴 选择增益`,
+            `👇 触碰卡片选择`,
+            `🔄 触碰下方刷新${cooldownStr}`
+        ].join('\n');
+        drawLeftDebugPanel(info);
+        return;
+    }
+    // 冷却百分比
+    const cdRemainPct = STATE.buddhaPalmCooldown > 0
+        ? Math.round((STATE.buddhaPalmCooldown / BUDDHA_COOLDOWN) * 100)
+        : 0;
+    const cdReducStr = STATE.cooldownReduction > 0 ? ` (减免+${STATE.cooldownReduction}%)` : '';
+    const info = [
+        `🚢 船血  ${STATE.shipHp}/${SHIP_MAX_HP}`,
+        `💰 金币  ${STATE.playerStats.gold}`,
+        `🖐 ${STATE.skillName}`,
+        `⏳ 冷却  ${cdRemainPct}%${cdReducStr}`
+    ].join('\n');
     drawLeftDebugPanel(info);
 }
 
