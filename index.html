@@ -229,7 +229,7 @@
             }
             try {
                 updateSkyTransition(dt);
-                game.updateBuddhaPalmSkills(dt);
+                game.updateCooldowns(dt);
 
                 if (renderer.xr.isPresenting) {
                     if (!STATE.gameOverState) {
@@ -243,7 +243,6 @@
                         game.checkLeftHandChoiceCardCollision();
                         vr.handleExit();
                         game.checkVRSkySwitch();
-                        game.checkBuddhaPalmTrigger();
                     }
                     game.updateDebris(dt);
                     game.updateParticles(dt);
@@ -319,20 +318,12 @@
             STATE.gameOverState = false;
             STATE.shipHp = 100;
             STATE.shipHitFlash = 0;
-            STATE.buddhaPalmReady = false;
-            STATE.buddhaPalmAttached = false;
-            STATE.buddhaPalmCooldown = 0;
             STATE.leftHandGunEnabled = false;
             STATE.ak48Attached = false;
             STATE.ak48LeftAttached = false;
             STATE.choiceCardsActive = false;
             STATE.choiceRefreshCount = 0;
             if (STATE.choiceCardTimeout) { clearTimeout(STATE.choiceCardTimeout); STATE.choiceCardTimeout = null; }
-            game.buddhaPalmSkills.forEach(p => {
-                p.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
-                scene.remove(p);
-            });
-            game.buddhaPalmSkills.length = 0;
             // 清除选择卡
             while (choiceCardGroup.children.length > 0) {
                 const child = choiceCardGroup.children[0];

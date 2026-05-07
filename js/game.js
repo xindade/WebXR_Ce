@@ -4,10 +4,8 @@ import * as THREE from '../three.module.js';
 let audioModule = null;
 export function setAudio(m) { audioModule = m; }
 function playPop() { if (audioModule) audioModule.playBalloonPopSound(); }
-
-// VR 模块注入（避免循环依赖）
-let vrModule = null;
-export function setVR(m) { vrModule = m; }
+// VR 模块注入（保留空函数，index.html 仍调用）
+export function setVR() {}
 
 import {
     scene, dolly, camera, bulletGroup, balloonGroup, particleGroup, debrisGroup, choiceCardGroup,
@@ -17,7 +15,6 @@ import {
     WAVE_BASE_SPAWN_COUNT, SPAWN_BATCH_INTERVAL, SPAWN_BATCH_SIZE, SPAWN_MAX_ACTIVE, SPAWN_DISTANCE, SPAWN_SPREAD,
     SHIP_MAX_HP, SHIP_COLLISION_RADIUS, BALLOON_REPEL_FORCE, SHIP_REPEL_FORCE, BALLOON_DAMAGE,
     CHOICE_CARD_DISTANCE,
-    BUDDHA_COOLDOWN, AIM_TIMEOUT,
     DEBRIS_COUNT, DEBRIS_LIFE, PARTICLE_COUNT, PARTICLE_LIFE,
     BOUND_X, BOUND_Z, balloonTex,
     applySkyTarget, skyCycle
@@ -127,7 +124,7 @@ export function createKnightBalloon(x, y, z) {
     knight.position.set(x, y, z);
     knight.traverse(child => { if (child.isMesh) child.castShadow = true; });
     knight.userData = { active: true, hp: KNIGHT_HP, maxHp: KNIGHT_HP, isKnight: true, radius: KNIGHT_RADIUS };
-    // 添加血条背景
+    // 血条背景（居中）
     const barBg = new THREE.Mesh(
         new THREE.PlaneGeometry(1.0, 0.08),
         new THREE.MeshBasicMaterial({ color: 0x333333, depthTest: false })
@@ -135,12 +132,14 @@ export function createKnightBalloon(x, y, z) {
     barBg.position.set(0, 1.3, 0);
     barBg.name = 'hpBarBg';
     knight.add(barBg);
-    // 血条填充
+    // 血条填充（几何体左移使左侧为锚点，position 对齐背景左边缘）
+    const fillGeom = new THREE.PlaneGeometry(0.96, 0.06);
+    fillGeom.translate(0.48, 0, 0); // 左边缘在 x=0
     const barFill = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.96, 0.06),
+        fillGeom,
         new THREE.MeshBasicMaterial({ color: 0x44ff44, depthTest: false })
     );
-    barFill.position.set(0, 1.3, 0.001);
+    barFill.position.set(-0.5, 1.3, 0.001);
     barFill.name = 'hpBarFill';
     knight.add(barFill);
     // 存储引用方便更新
@@ -574,13 +573,6 @@ export function clearChoiceCards() {
     }
     setTimeout(() => {
         STATE.waveNumber++;
-        if (STATE.waveNumber >= 1 && !STATE.buddhaPalmReady) {
-            STATE.buddhaPalmReady = true;
-            if (vrModule && vrModule.attachBuddhaPalmToLeft) {
-                setTimeout(() => vrModule.attachBuddhaPalmToLeft(), 500);
-            }
-            console.log('🖐️ 如来神掌已解锁！左手握柄侧键释放');
-        }
         spawnBalloons();
         console.log('🎈 第' + STATE.waveNumber + '波气球已生成（含骑士:' + (STATE.waveNumber >= 1 ? '是' : '否') + '）');
     }, 1000);
@@ -595,7 +587,7 @@ export function checkLeftHandChoiceCardCollision() {
         const cardWorldPos = new THREE.Vector3();
         card.getWorldPosition(cardWorldPos);
         const dist = leftPos.distanceTo(cardWorldPos);
-        if (dist < 0.4) {
+        if (dist < 0.12) {
             if (card.userData.isRefreshCard) {
                 // 触碰刷新卡
                 if (STATE.choiceRefreshCooldown > 0) return;
@@ -781,94 +773,8 @@ export function updateDebris(dt) {
     }
 }
 
-// ===================== 如来神掌 =====================
-export const buddhaPalmSkills = [];
-let previewPalm = null;
-let aimDirection = new THREE.Vector3();
-
-export function createPromptSprite() {
-    const canvas = document.createElement('canvas');
-    canvas.width = 512; canvas.height = 128;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.fillRect(0, 0, 512, 128);
-    ctx.fillStyle = '#ffd700';
-    ctx.font = 'bold 36px "Microsoft YaHei", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('🖐️ 再按握柄释放如来神掌', 256, 55);
-    ctx.fillStyle = '#aaa';
-    ctx.font = '24px "Microsoft YaHei", sans-serif';
-    ctx.fillText('或 5 秒后自动释放', 256, 95);
-    const tex = new THREE.CanvasTexture(canvas);
-    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false });
-    const s = new THREE.Sprite(mat);
-    s.scale.set(2, 0.5, 1);
-    s.visible = false;
-    return s;
-}
-
-export function attachBuddhaPalmToLeft() {
-    if (!STATE.buddhaPalmModel || !STATE.leftGrip || STATE.buddhaPalmAttached) return;
-    const palm = STATE.buddhaPalmModel.clone();
-    palm.scale.setScalar(0.2);
-    palm.position.set(0, -0.08, 0.03);
-    palm.rotation.set(-90, 0, 0);
-    palm.traverse(c => { if (c.isMesh) c.castShadow = true; });
-    palm.userData = { isBuddhaPalm: true };
-    STATE.leftGrip.add(palm);
-    STATE.buddhaPalmAttached = true;
-    const promptSprite = createPromptSprite();
-    promptSprite.position.set(0, 1.8, -1.5);
-    dolly.add(promptSprite);
-    console.log('🖐️ 如来神掌已装备到左手');
-}
-
-export function enterAimingMode() {
-    STATE.buddhaPalmState = 'AIMING';
-    STATE.buddhaPalmTimer = AIM_TIMEOUT;
-    aimDirection.set(0, 0, -1).applyQuaternion(camera.quaternion);
-    aimDirection.y = 0; aimDirection.normalize();
-    if (STATE.buddhaPalmModel && !previewPalm) {
-        previewPalm = STATE.buddhaPalmModel.clone();
-        previewPalm.scale.setScalar(2.0);
-        previewPalm.rotation.set(-Math.PI / 2, 0, 0);
-        previewPalm.traverse(c => { if (c.isMesh) c.castShadow = true; });
-        previewPalm.userData = { isPreview: true };
-        dolly.add(previewPalm);
-    }
-    if (previewPalm) {
-        previewPalm.visible = true;
-        previewPalm.position.set(0, 0.5, -4);
-    }
-    console.log('🎯 瞄准：再按握柄释放，或' + AIM_TIMEOUT + '秒自动');
-}
-
-export function releaseBuddhaPalm() {
-    if (!STATE.buddhaPalmModel) return;
-    if (previewPalm) previewPalm.visible = false;
-    STATE.buddhaPalmState = 'SLAMMING';
-    STATE.buddhaPalmCooldown = BUDDHA_COOLDOWN;
-
-    const palm = STATE.buddhaPalmModel.clone();
-    palm.scale.setScalar(20.0);
-    palm.rotation.set(-Math.PI / 2, 0, 0);
-    palm.traverse(c => { if (c.isMesh) c.castShadow = true; });
-    const camWorld = new THREE.Vector3();
-    camera.getWorldPosition(camWorld);
-    palm.position.copy(camWorld).addScaledVector(aimDirection, 3);
-    palm.position.y += 20;
-    palm.userData = {
-        isBuddhaSkill: true, elapsed: 0,
-        startY: palm.position.y, targetY: camWorld.y,
-        fallDuration: 0.5, killRadius: 10, damage: 1000
-    };
-    scene.add(palm);
-    buddhaPalmSkills.push(palm);
-    console.log('🖐 如来神掌释放！20x从' + palm.position.y.toFixed(1) + 'm落下');
-}
-
-export function updateBuddhaPalmSkills(dt) {
-    if (STATE.buddhaPalmCooldown > 0) STATE.buddhaPalmCooldown -= dt;
+// ===================== 刷新冷却管理 =====================
+export function updateCooldowns(dt) {
     const prevCd = STATE.choiceRefreshCooldown;
     if (STATE.choiceRefreshCooldown > 0) {
         STATE.choiceRefreshCooldown -= dt;
@@ -878,67 +784,6 @@ export function updateBuddhaPalmSkills(dt) {
     if (prevCd > 0 && STATE.choiceRefreshCooldown <= 0 && STATE.choiceCardsActive) {
         updateRefreshCardTexture();
     }
-
-    if (STATE.buddhaPalmState === 'AIMING') {
-        STATE.buddhaPalmTimer -= dt;
-        if (previewPalm && previewPalm.visible) {
-            const offset = aimDirection.clone().multiplyScalar(4);
-            offset.y = 0.5;
-            previewPalm.position.copy(offset);
-        }
-        if (STATE.buddhaPalmTimer <= 0) releaseBuddhaPalm();
-    }
-
-    for (let i = buddhaPalmSkills.length - 1; i >= 0; i--) {
-        const palm = buddhaPalmSkills[i];
-        const ud = palm.userData;
-        ud.elapsed += dt;
-        const t = Math.min(1, ud.elapsed / ud.fallDuration);
-        palm.position.y = ud.startY + (ud.targetY - ud.startY) * t;
-
-        if (t >= 1 && !ud.landed) {
-            ud.landed = true;
-            palm.position.y = ud.targetY;
-            const pw = new THREE.Vector3(); palm.getWorldPosition(pw);
-            let killed = 0;
-            balloons.forEach(b => {
-                if (!b.userData.active) return;
-                if (b.position.distanceTo(pw) < ud.killRadius) {
-                    b.userData.hp -= ud.damage;
-                    if (b.userData.hp <= 0) {
-                        b.userData.active = false;
-                        if (b.userData.isKnight) { b.traverse(c => { if (c.isMesh) c.visible = false; }); STATE.playerStats.score += KNIGHT_SCORE; }
-                        else { b.visible = false; STATE.playerStats.score += BALLOON_SCORE; }
-                        killed++;
-                    }
-                }
-            });
-            console.log('🖐 神掌击杀 ' + killed + '（20x, 半径10, 伤害1000）');
-            spawnParticles(pw, 0xffdd44, 80);
-            playPop();
-            checkAllBalloonsDestroyed();
-            ud.cleanupDelay = 0.3;
-        }
-
-        if (ud.cleanupDelay !== undefined) {
-            ud.cleanupDelay -= dt;
-            if (ud.cleanupDelay <= 0) {
-                palm.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
-                scene.remove(palm);
-                buddhaPalmSkills.splice(i, 1);
-                STATE.buddhaPalmState = 'IDLE';
-            }
-        }
-    }
-}
-
-export function checkBuddhaPalmTrigger() {
-    if (!STATE.buddhaPalmReady || STATE.buddhaPalmCooldown > 0) return;
-    if (STATE.leftBtnState.grip && !STATE.prevLeftGrip) {
-        if (STATE.buddhaPalmState === 'IDLE') enterAimingMode();
-        else if (STATE.buddhaPalmState === 'AIMING') releaseBuddhaPalm();
-    }
-    STATE.prevLeftGrip = STATE.leftBtnState.grip;
 }
 
 export function checkVRSkySwitch() {
@@ -972,9 +817,9 @@ function roundRect(ctx, x, y, w, h, r) {
 // 聚合导出（避免 PICO 4 浏览器 import * as 兼容性问题）
 export const GameAPI = {
     setAudio, setVR,
-    updateBuddhaPalmSkills, updateBullets, updateBalloons, updateWaveSpawning,
+    updateCooldowns, updateBullets, updateBalloons, updateWaveSpawning,
     checkBulletBalloonCollisions, checkLeftHandChoiceCardCollision,
-    updateDebris, updateParticles, checkVRSkySwitch, checkBuddhaPalmTrigger,
+    updateDebris, updateParticles, checkVRSkySwitch,
     spawnBalloons, restartLevel, gameOver,
-    balloons, buddhaPalmSkills, bullets
+    balloons, bullets
 };

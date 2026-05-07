@@ -59,9 +59,6 @@ export const SHIP_REPEL_FORCE = 2.0;
 
 export const CHOICE_CARD_DISTANCE = 0.75;
 
-export const BUDDHA_COOLDOWN = 8;
-export const AIM_TIMEOUT = 5;
-
 export const AK48_SCALE = 0.6;
 export const SHIP_SCALE = 7.0;
 export const SHIP_POS = [1, 1, 0.05];
@@ -91,8 +88,6 @@ export const STATE = {
     fireRate: 1.0,
     multiShotChance: 0,
     explosionRadius: 0,
-    cooldownReduction: 0,
-    skillName: '如来神掌',
 
     choiceCardsActive: false,
     choiceRefreshCount: 0,
@@ -102,12 +97,6 @@ export const STATE = {
     choiceCardTimeout: null,
 
     prevLeftTrigger: false,
-
-    buddhaPalmReady: false,
-    buddhaPalmAttached: false,
-    buddhaPalmCooldown: 0,
-    buddhaPalmState: 'IDLE',
-    buddhaPalmTimer: 0,
 
     rightInput: { stickX: 0, stickY: 0 },
     leftInput: { stickX: 0, stickY: 0 },
@@ -119,7 +108,6 @@ export const STATE = {
 
     prevLeftX: false,
     prevLeftY: false,
-    prevLeftGrip: false,
 
     leftController: null,
     rightController: null,
@@ -131,7 +119,6 @@ export const STATE = {
     ak48LeftAttached: false,
     shipModel: null,
     knightModel: null,
-    buddhaPalmModel: null,
 
     lastRightShootTime: 0,
     lastLeftShootTime: 0,

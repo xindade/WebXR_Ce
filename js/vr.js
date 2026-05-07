@@ -5,7 +5,7 @@ import {
     renderer, scene, dolly, camera, STATE,
     SHOOT_COOLDOWN, MOVE_SPEED, DEADZONE, BOUND_X, BOUND_Z,
     AK48_SCALE, SHIP_SCALE, SHIP_POS, SHIP_ROT,
-    SPAWN_MAX_ACTIVE, BUDDHA_COOLDOWN, SHIP_MAX_HP,
+    SPAWN_MAX_ACTIVE, SHIP_MAX_HP,
     roundRect
 } from './core.js';
 import { shootBullet } from './game.js';
@@ -185,12 +185,6 @@ gltfLoader.load('Model/骑士.glb', (gltf) => {
     STATE.knightModel = gltf.scene;
     console.log('✅ 骑士模型加载成功');
 }, undefined, () => console.warn('⚠️ 骑士模型未找到'));
-
-// 如来神掌
-gltfLoader.load('Model/如来神掌.glb', (gltf) => {
-    STATE.buddhaPalmModel = gltf.scene;
-    console.log('✅ 如来神掌模型加载成功');
-}, undefined, () => console.warn('⚠️ 如来神掌模型未找到'));
 
 // ===================== 枪支挂载 =====================
 export function attachAK48() {
@@ -424,28 +418,10 @@ function drawLeftDebugPanel(info, countdown) {
     c.clearRect(0, 0, w, h);
     c.fillStyle = 'rgba(0,0,0,0.82)';
     roundRect(c, 0, 0, w, h, 24); c.fill();
-    c.strokeStyle = '#ff6600'; c.lineWidth = 4;
+    c.strokeStyle = '#00ffcc'; c.lineWidth = 4;
     roundRect(c, 2, 2, w - 4, h - 4, 22); c.stroke();
 
-    // AIMING 模式：显示大倒计时数字
-    if (typeof countdown === 'number') {
-        const numStr = String(Math.max(0, Math.ceil(countdown)));
-        const fontSize = 180;
-        c.textAlign = 'center';
-        c.textBaseline = 'middle';
-        c.strokeStyle = '#000000';
-        c.lineWidth = 12;
-        c.font = `bold ${fontSize}px monospace`;
-        c.strokeText(numStr, w / 2, h / 2);
-        c.fillStyle = '#ffd700';
-        c.fillText(numStr, w / 2, h / 2);
-        c.textAlign = 'start';
-        c.textBaseline = 'alphabetic';
-        if (leftDebugTexture) leftDebugTexture.needsUpdate = true;
-        return;
-    }
-
-    c.fillStyle = '#ff6600';
+    c.fillStyle = '#00ffcc';
     c.font = 'bold 28px monospace';
     c.fillText('🚢 飞船状态', 18, 42);
     c.fillStyle = '#ffffff';
@@ -456,11 +432,6 @@ function drawLeftDebugPanel(info, countdown) {
 
 export function updateLeftDebugPanel() {
     if (!leftDebugPanel) return;
-    // AIMING 模式：显示大倒计时
-    if (STATE.buddhaPalmState === 'AIMING') {
-        drawLeftDebugPanel('', STATE.buddhaPalmTimer);
-        return;
-    }
     // 选项卡刷新提示
     if (STATE.choiceCardsActive) {
         const cdLeft = Math.max(0, STATE.choiceRefreshCooldown).toFixed(1);
@@ -474,16 +445,9 @@ export function updateLeftDebugPanel() {
         drawLeftDebugPanel(info);
         return;
     }
-    // 冷却百分比
-    const cdRemainPct = STATE.buddhaPalmCooldown > 0
-        ? Math.round((STATE.buddhaPalmCooldown / BUDDHA_COOLDOWN) * 100)
-        : 0;
-    const cdReducStr = STATE.cooldownReduction > 0 ? ` (减免+${STATE.cooldownReduction}%)` : '';
     const info = [
         `🚢 船血  ${STATE.shipHp}/${SHIP_MAX_HP}`,
-        `💰 金币  ${STATE.playerStats.gold}`,
-        `🖐 ${STATE.skillName}`,
-        `⏳ 冷却  ${cdRemainPct}%${cdReducStr}`
+        `💰 金币  ${STATE.playerStats.gold}`
     ].join('\n');
     drawLeftDebugPanel(info);
 }
