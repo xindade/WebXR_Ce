@@ -6,9 +6,11 @@ import {
     SHOOT_COOLDOWN, MOVE_SPEED, DEADZONE, BOUND_X, BOUND_Z,
     AK48_SCALE, SHIP_SCALE, SHIP_POS, SHIP_ROT,
     SPAWN_MAX_ACTIVE, SHIP_MAX_HP,
+    BUDDHA_COOLDOWN,
+    RAY_SPHERE_RADIUS, RAY_SPHERE_POS, RAY_SPHERE_COLOR, RAY_PITCH_ANGLE,
     roundRect
 } from './core.js';
-import { shootBullet } from './game.js';
+import { shootBullet, attachBuddhaPalmToLeft } from './game.js';
 
 if (window.__log) window.__log('vr.js 模块加载完成', 's');
 
@@ -168,23 +170,35 @@ gltfLoader.load('Model/Ak48.glb', (gltf) => {
     import('./core.js').then(m => m.onResourceError('⚠️ 模型加载失败'));
 });
 
-// 气球船
-gltfLoader.load('Model/气球船.glb', (gltf) => {
+// 鲲鹏（替换原气球船）
+gltfLoader.load('Model/鲲鹏.glb', (gltf) => {
     STATE.shipModel = gltf.scene;
     STATE.shipModel.scale.setScalar(SHIP_SCALE);
     STATE.shipModel.position.set(...SHIP_POS);
     STATE.shipModel.rotation.set(...SHIP_ROT);
     STATE.shipModel.traverse(child => { if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; } });
     scene.add(STATE.shipModel);
+    window.__log('🦅 鲲鹏模型加载成功', 's');
 }, (progress) => {
-    if (progress.total > 0) console.log('气球船 加载: ' + (progress.loaded / progress.total * 100).toFixed(1) + '%');
-}, () => console.warn('⚠️ 气球船.glb 未找到'));
+    if (progress.total > 0) console.log('鲲鹏 加载: ' + (progress.loaded / progress.total * 100).toFixed(1) + '%');
+}, (error) => {
+    console.warn('⚠️ 鲲鹏.glb 未找到:', error ? error.message : '');
+});
 
 // 骑士
 gltfLoader.load('Model/骑士.glb', (gltf) => {
     STATE.knightModel = gltf.scene;
     console.log('✅ 骑士模型加载成功');
 }, undefined, () => console.warn('⚠️ 骑士模型未找到'));
+
+// 如来神掌
+gltfLoader.load('Model/如来神掌.glb', (gltf) => {
+    STATE.buddhaPalmModel = gltf.scene;
+    console.log('✅ 如来神掌模型加载成功');
+    if (STATE.buddhaPalmUnlocked) {
+        attachBuddhaPalmToLeft();
+    }
+}, undefined, () => console.warn('⚠️ 如来神掌.glb 未找到'));
 
 // ===================== 枪支挂载 =====================
 export function attachAK48() {
@@ -240,6 +254,32 @@ export function setupController(idx) {
         STATE.leftGrip = grip;
         const leftPanel = createLeftDebugPanel();
         grip.add(leftPanel);
+        // 左手射线指示球
+        const raySphere = new THREE.Mesh(
+            new THREE.SphereGeometry(RAY_SPHERE_RADIUS, 16, 16),
+            new THREE.MeshStandardMaterial({ color: RAY_SPHERE_COLOR, emissive: RAY_SPHERE_COLOR, emissiveIntensity: 0.5, transparent: true, opacity: 0.8 })
+        );
+        raySphere.position.set(RAY_SPHERE_POS[0], RAY_SPHERE_POS[1], RAY_SPHERE_POS[2]);
+        raySphere.name = 'leftRaySphere';
+        grip.add(raySphere);
+        STATE.leftRaySphere = raySphere;
+        // 可见射线线条（从球体沿射线方向延伸3米）
+        const rayDir = new THREE.Vector3(
+            0,
+            Math.sin(-RAY_PITCH_ANGLE * Math.PI / 180),  // pitch -30° → sin(30°) = 0.5 向上
+            -Math.cos(-RAY_PITCH_ANGLE * Math.PI / 180)  // cos(30°) ≈ 0.866
+        );
+        const rayLen = 3;
+        const lineStart = new THREE.Vector3(RAY_SPHERE_POS[0], RAY_SPHERE_POS[1], RAY_SPHERE_POS[2]);
+        const lineEnd = lineStart.clone().addScaledVector(rayDir, rayLen);
+        const lineGeom = new THREE.BufferGeometry().setFromPoints([lineStart, lineEnd]);
+        const lineMat = new THREE.LineBasicMaterial({
+            color: 0x00ffff, transparent: true, opacity: 0.35, linewidth: 1
+        });
+        const rayLine = new THREE.Line(lineGeom, lineMat);
+        rayLine.name = 'leftRayLine';
+        grip.add(rayLine);
+        window.__log('🔵 左手射线球+可见射线已添加', 's');
     }
     if (idx === 0) STATE.leftController = controller;
     else STATE.rightController = controller;
@@ -435,19 +475,27 @@ export function updateLeftDebugPanel() {
     // 选项卡刷新提示
     if (STATE.choiceCardsActive) {
         const cdLeft = Math.max(0, STATE.choiceRefreshCooldown).toFixed(1);
-        const fee = 10 * Math.pow(2, STATE.choiceRefreshCount);
-        const cooldownStr = STATE.choiceRefreshCooldown > 0 ? ` 冷却${cdLeft}s` : '';
         const info = [
             `🎴 选择增益`,
             `👇 触碰卡片选择`,
-            `🔄 触碰下方刷新${cooldownStr}`
+            `🔄 触碰下方刷新${STATE.choiceRefreshCooldown > 0 ? ' 冷却' + cdLeft + 's' : ''}`
         ].join('\n');
         drawLeftDebugPanel(info);
         return;
     }
+    // 默认状态
+    let buddhaLine = '🖐 未解锁';
+    if (STATE.buddhaPalmReady) {
+        if (STATE.buddhaPalmCooldown > 0) {
+            buddhaLine = `🖐 冷却${STATE.buddhaPalmCooldown.toFixed(1)}s`;
+        } else {
+            buddhaLine = '🖐 就绪';
+        }
+    }
     const info = [
         `🚢 船血  ${STATE.shipHp}/${SHIP_MAX_HP}`,
-        `💰 金币  ${STATE.playerStats.gold}`
+        `💰 金币  ${STATE.playerStats.gold}`,
+        buddhaLine
     ].join('\n');
     drawLeftDebugPanel(info);
 }

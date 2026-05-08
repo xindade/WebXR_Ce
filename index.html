@@ -17,8 +17,9 @@
         }
         canvas { display: block; }
 
-        #vr-entry { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); z-index: 20; }
+        #vr-entry { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); z-index: 20; display: flex; gap: 28px; align-items: flex-end; }
         #btn-container { display: flex; flex-direction: column; gap: 12px; align-items: center; }
+        #level-container { display: flex; flex-direction: column; gap: 4px; align-items: center; }
         .vr-btn {
             display: block; padding: 16px 44px; font-size: 20px; font-weight: 700;
             letter-spacing: 2px; color: #fff;
@@ -122,6 +123,12 @@
             <button id="enter-vr-btn" class="vr-btn">🎈 正常开始游戏</button>
             <button id="enter-vr-left-hand" class="vr-btn vr-btn-alt">🔫 左手持枪模式</button>
         </div>
+        <div id="level-container">
+            <div style="color:#fff;font-size:13px;letter-spacing:1px;margin-bottom:8px;text-align:center;opacity:0.7;">选择关卡</div>
+            <button class="vr-btn level-btn" data-level="1" style="min-width:160px;padding:12px 24px;font-size:16px;">📌 关卡 1</button>
+            <button class="vr-btn level-btn" data-level="2" style="min-width:160px;padding:12px 24px;font-size:16px;margin-top:8px;">📌 关卡 2</button>
+            <button class="vr-btn level-btn" data-level="3" style="min-width:160px;padding:12px 24px;font-size:16px;margin-top:8px;">📌 关卡 3</button>
+        </div>
     </div>
     <div id="vr-hints" style="display:none"></div>
     <div id="status-msg"></div>
@@ -216,6 +223,20 @@
         enterVRBtn.onclick = () => enterVR(false);
         enterVRLeftHandBtn.onclick = () => enterVR(true);
 
+        // 关卡选择按钮
+        let selectedLevel = 0;
+        document.querySelectorAll('.level-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                selectedLevel = parseInt(btn.dataset.level);
+                STATE.playerStats.gold = 1000;
+                STATE.playerStats.atk = 100;
+                window.__log('已选关卡 ' + selectedLevel + '（gold:1000 atk:100）', 's');
+                // 高亮当前选中的关卡按钮
+                document.querySelectorAll('.level-btn').forEach(b => b.style.boxShadow = 'none');
+                btn.style.boxShadow = '0 0 16px rgba(255,215,0,0.7)';
+            });
+        });
+
         // 动画循环
         const clock = new THREE.Clock();
         function animate() {
@@ -241,6 +262,8 @@
                         game.updateWaveSpawning(dt);
                         game.checkBulletBalloonCollisions();
                         game.checkLeftHandChoiceCardCollision();
+                        game.updateChoiceCards(dt);
+                        game.updateBuddhaPalm(dt);
                         vr.handleExit();
                         game.checkVRSkySwitch();
                     }
@@ -299,6 +322,18 @@
                     STATE.gameOverState = false;
                     STATE.shipHp = 100;
                     STATE.shipHitFlash = 0;
+                    // 应用关卡选择
+                    if (selectedLevel > 0) {
+                        STATE.playerStats.gold = 1000;
+                        STATE.playerStats.atk = 100;
+                        STATE.waveNumber = selectedLevel - 1;
+                        STATE.buddhaPalmUnlocked = true;
+                        window.__log('关卡' + selectedLevel + ' 生效: gold=' + STATE.playerStats.gold + ' atk=' + STATE.playerStats.atk + ' wave=' + STATE.waveNumber, 's');
+                        // 模型已在初始化时加载，同步解锁如来神掌
+                        if (STATE.buddhaPalmModel && STATE.leftGrip) {
+                            game.attachBuddhaPalmToLeft();
+                        }
+                    }
                     game.spawnBalloons();
                     window.__log('游戏开始 / 气球生成', 's');
                 }
@@ -323,6 +358,10 @@
             STATE.ak48LeftAttached = false;
             STATE.choiceCardsActive = false;
             STATE.choiceRefreshCount = 0;
+            game.resetBuddhaPalm();
+            STATE.buddhaPalmReady = false;
+            STATE.buddhaPalmUnlocked = false;
+            selectedLevel = 0;
             if (STATE.choiceCardTimeout) { clearTimeout(STATE.choiceCardTimeout); STATE.choiceCardTimeout = null; }
             // 清除选择卡
             while (choiceCardGroup.children.length > 0) {

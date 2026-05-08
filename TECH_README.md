@@ -1,6 +1,6 @@
 # VR 热气球射击游戏 — 技术文档
 
-> 最后更新: 2026-05-07 | 入口: `index.html` + `js/` 模块 | Three.js r168 ES Module + WebXR
+> 最后更新: 2026-05-08 | 入口: `index.html` + `js/` 模块 | Three.js r168 ES Module + WebXR
 
 ---
 
@@ -10,7 +10,7 @@
 
 玩家站在热气球托盘（气球船）上，使用 AK48 枪支射击从四周涌来的气球敌人，通过波次战斗、稀有度抽卡升级、如来神掌清屏大招等机制推进游戏。
 
-- **入口**: `index.html`（~388行）+ `js/core.js` / `js/game.js` / `js/vr.js` / `js/logger.js`（总计约 2400 行）
+- **入口**: `index.html`（~393行）+ `js/core.js` / `js/game.js` / `js/vr.js` / `js/logger.js`（总计约 2500 行）
 - **部署**: GitHub Pages（`https://github.com/xindade/WebXR_Ce.git`）
 - **测试设备**: PICO 4 VR 头显
 - **开发服务器**: Node.js HTTPS 端口 3443 / HTTP 端口 3000
@@ -39,9 +39,9 @@
 | 文件 | 行数 | 职责 |
 |:-----|:----:|:-----|
 | `js/logger.js` | ~65 | 独立日志（`<script>` 同步加载，ES Module 前执行） |
-| `js/core.js` | ~548 | 常量、共享状态 STATE、Three.js 核心（渲染器/场景/相机）、灯光、天空、云朵、容器 |
-| `js/game.js` | ~981 | 子弹、气球、波次生成、碰撞、抽卡、如来神掌、特效（碎片/粒子） |
-| `js/vr.js` | ~499 | 音效、模型加载、手柄、枪支挂载、输入处理、UI 面板 |
+| `js/core.js` | ~600 | 常量、共享状态 STATE、Three.js 核心（渲染器/场景/相机）、灯光、天空、云朵、容器 |
+| `js/game.js` | ~1060 | 子弹、气球、波次生成、碰撞、抽卡、如来神掌、特效（碎片/粒子） |
+| `js/vr.js` | ~500 | 音效、模型加载、手柄、枪支挂载、输入处理、UI 面板、左手射线球/射线 |
 
 ### 3.2 模块间依赖与注入
 
@@ -149,8 +149,8 @@ Scene (world space)
 ├── particleGroup                       ← 粒子对象池 (50个)
 ├── debrisGroup                         ← 碎片对象池 (30个)
 ├── cloud groups × 12                   ← 白色球体组，世界空间固定
-├── shipModel (气球船.glb)              ← 玩家乘坐的热气球场景
-├── buddhaPalmSkills[]                  ← 飞行/下落中的神掌
+├── shipModel (鲲鹏.glb)                ← 玩家乘坐的鲲鹏模型
+├── buddhaPalmActiveList[]              ← 飞行/下落中的神掌
 │
 └── dolly (Group)                       ← 玩家移动根节点
     ├── camera (PerspectiveCamera)      ← 72° FOV, 局部 y=6.6
@@ -159,9 +159,10 @@ Scene (world space)
     ├── sunSprite (Sprite)              ← 太阳 (NormalBlending, 8m)
     ├── moonSprite (Sprite)             ← 月牙 (AdditiveBlending, 5m)
     ├── choiceCardGroup (Group)         ← 3属性卡 + 1刷新卡
-    ├── promptSprite (Sprite)           ← 如来神掌提示文字
     ├── leftController / leftGrip       ← XR 左手
-    │   ├── 神掌模型 (scale=0.2)        ← 解锁后挂载
+    │   ├── 神掌模型 (scale=0.2, 平放)  ← 解锁后挂载
+    │   ├── leftRaySphere (r=0.05)      ← 青色射线球
+    │   └── rayLine (3m 青色半透明)     ← 可见射线线条
     │   └── leftDebugPanel              ← 左手腕 UI (512×256px, 0.18×0.09m)
     └── rightController / rightGrip     ← XR 右手
         ├── AK48 模型 (scale=0.6)       ← 枪支
@@ -224,7 +225,7 @@ Scene (world space)
 | `SPAWN_DISTANCE` | 15 | 生成距离 (m) |
 | `SPAWN_SPREAD` | 8 | 散布范围 (m) |
 
-### 6.6 气球船
+### 6.6 鲲鹏（原气球船）
 
 | 常量 | 值 | 说明 |
 |:-----|:---:|:-----|
@@ -232,16 +233,20 @@ Scene (world space)
 | `SHIP_COLLISION_RADIUS` | 2.5 | 碰撞半径 |
 | `SHIP_REPEL_FORCE` | 2.0 | 对气球排斥力 |
 | `BALLOON_REPEL_FORCE` | 3.0 | 气球互斥力 |
-| `SHIP_SCALE` | 7.0 | 模型缩放 |
-| `SHIP_POS` | [1, 1, 0.05] | 世界坐标 |
-| `SHIP_ROT` | [0, 1.57, 0] | 弧度 (Y 轴 90°) |
+| `SHIP_SCALE` | 7.0 | 模型缩放（整体放大7倍） |
+| `SHIP_POS` | [1, 1, 0.05] | 世界坐标 [x=右1m, y=离地1m, z≈0] |
+| `SHIP_ROT` | [0, 1.57, 0] | 弧度 (Y 轴 90° 使正面朝前) |
 
 ### 6.7 如来神掌
 
 | 常量 | 值 | 说明 |
 |:-----|:---:|:-----|
 | `BUDDHA_COOLDOWN` | 8 | 冷却 (s) |
-| `AIM_TIMEOUT` | 5 | 瞄准超时 (s) |
+| `BUDDHA_KILL_RADIUS` | 50 | 杀伤半径 (m, 直接拉满) |
+| `BUDDHA_DAMAGE` | 1000 | 伤害 |
+| `BUDDHA_HAND_SCALE` | 0.2 | 装备在手柄的缩放 |
+| `BUDDHA_HAND_POS` | [0, -0.08, 0.03] | 手柄局部坐标 |
+| `BUDDHA_HAND_ROT_X` | `-PI/2` | 平放角度 |
 
 详见第 14 节完整参数表。
 
@@ -456,18 +461,20 @@ b.position.x += pushX; b.position.z += pushZ;
 
 ### 12.5 交互方式
 
-- 左手柄靠近卡片距离 < 0.4m 自动选中
-- 3 张属性卡横向排列，间距 0.55m
-- 刷新卡在下方 0.25m
-- 所有卡片挂在 `dolly` 下，面朝玩家
+- **左手射线选择**: 左手柄青色发光小球发射可见射线（与子弹同角度 -30° 上仰），射线指向的卡片高亮（移近 0.1m + 缩放 1.2x）
+- 属性卡和刷新卡均支持高亮反馈
+- 扳机确认选择（上升沿检测，避免持续触发）
+- 3 张属性卡横向排列，间距 `CHOICE_CARD_SPACING=0.8m`
+- 刷新卡在下方 `CHOICE_REFRESH_OFFSET_Y=-0.25m`
+- 所有卡片跟随头显（每帧重算位置），始终在玩家正前方
 - 15 秒超时自动跳过
 
 ### 12.6 波次推进
 
 选择/超时后 → 清理卡片 → 1 秒后:
 1. `waveNumber++`
-2. 若 `waveNumber >= 1` 且未解锁 → 解锁如来神掌
-3. `spawnBalloons()` 开始下一波
+2. `spawnBalloons()` 开始下一波
+3. 如来神掌在 `clearChoiceCards` 中由 `waveNumber >= 1` 条件触发，选关时通过 `buddhaPalmUnlocked` 标记在模型加载时即解锁
 
 ---
 
@@ -489,43 +496,46 @@ gameOver() → 所有气球 inactive → 1.5s → restartLevel()
 
 ### 14.1 解锁
 
-打完第 0 波后（`clearChoiceCards` 中 `waveNumber >= 1`）自动调用 `attachBuddhaPalmToLeft()`。
+| 方式 | 条件 | 触发 |
+|:-----|:-----|:-----|
+| 正常游戏 | 打完第 0 波后 `clearChoiceCards` 中 `waveNumber >= 1` → `attachBuddhaPalmToLeft()` |
+| 选关模式 | `sessionstart` 中 `selectedLevel > 0` → 设置 `STATE.buddhaPalmUnlocked = true`，模型已加载时直接调用，否则等加载回调 |
 
 ### 14.2 状态机
 
 ```
-IDLE → (左手握柄上升沿) → AIMING → (左手握柄 或 5秒超时) → SLAMMING → IDLE(冷却8秒)
+IDLE → (左手握柄上升沿 + 冷却结束) → 直接释放（无瞄准状态）→ IDLE(冷却8秒)
 ```
+
+**简化说明**: 握柄即放，无预览、无瞄准等待、无二次确认。
 
 ### 14.3 全部参数
 
-| 阶段 | 参数 | 值 | 代码位置 |
-|:-----|:-----|:---:|:---------|
-| 装备 | `palm.scale` | 0.2 | `attachBuddhaPalmToLeft()` |
-| | `palm.position` | (0, -0.08, 0.03) | 相对 leftGrip |
-| | `palm.rotation` | (-90°, 0, 0) | 弧度 |
-| 瞄准 | `preview.scale` | 2.0 | `enterAimingMode()` |
-| | `preview.position` | (0, 0.5, -4) | dolly 局部 |
-| 释放 | `palm.scale` | 20.0 | `releaseBuddhaPalm()` |
-| | `startPos` | camPos + aimDir×3 + y+20 | `palm.position` |
-| | `fallDuration` | 0.5s | `userData.fallDuration` |
-| 碰撞 | `killRadius` | 10m | 神掌 userData |
-| | `damage` | 1000 | 神掌 userData |
-| | `particles` | 80 | 金色粒子爆炸 |
-| 清理 | `cleanupDelay` | 0.3s | 落地后消失 |
+| 阶段 | 参数 | 值 | 说明 |
+|:-----|:-----|:---:|:-----|
+| 装备 | `BUDDHA_HAND_SCALE` | 0.2 | 装备在左手柄的缩放 |
+|  | `BUDDHA_HAND_POS` | (0, -0.08, 0.03) | 相对 leftGrip 局部坐标 |
+|  | `BUDDHA_HAND_ROT_X` | `-PI/2` | 平放（手掌朝下） |
+| 释放 | `BUDDHA_FALL_START_SCALE` | 2.0 | 起始缩放 |
+|  | `BUDDHA_FALL_END_SCALE` | 20.0 | 落地缩放 |
+|  | `BUDDHA_FALL_HEIGHT` | 20m | 起始高度（玩家上方） |
+|  | `BUDDHA_FALL_FORWARD` | 3m | 落地偏移（瞄准方向前方） |
+|  | `BUDDHA_FALL_DURATION` | 0.5s | 下落动画时长 |
+| 碰撞 | `BUDDHA_KILL_RADIUS` | 50m | 杀伤半径（覆盖全地图） |
+|  | `BUDDHA_DAMAGE` | 1000 | 对气球伤害 |
+|  | `BUDDHA_PARTICLE_COUNT` | 20 | 落地金色粒子数 |
+| 冷却 | `BUDDHA_COOLDOWN` | 8s | 两次释放间隔 |
+| 清理 | `BUDDHA_IMPACT_CLEANUP` | 0.3s | 落地后网格清理延迟 |
 
-### 14.4 核心逻辑
+### 14.4 核心流程
 
-1. **第一次握柄** (上升沿 IDLE→AIMING):
+1. **握柄释放** (IDLE → grip 上升沿 + cooldown=0):
    - 锁定 `aimDirection`（当前 camera 朝向，去 Y）
-   - 生成 2x 预览在 (0, 0.5, -4) dolly 局部
-   - 显示提示 Sprite
-   - 左手腕 UI 切换为大倒计时数字
-2. **第二次握柄 或 5s 超时** (AIMING→SLAMMING):
-   - 预览消失，20x 神掌从锁定方向上方 20m 处 0.5s 落地
-   - 半径 10m 内气球扣 1000 HP，≤0 即死
-   - 80 金色粒子 + 气球爆炸音效
-   - 0.3s 后消失 → IDLE → 8s 冷却
+   - 20x 手掌从瞄准方向上方 20m 处 0.5s 落地
+   - 手掌旋转设为 `-PI/2` 平放
+   - 落地后半径 50m 内气球扣 1000 HP
+   - 金色粒子爆炸
+   - 冷却 8s 后可再次使用
 
 ---
 
@@ -576,7 +586,6 @@ IDLE → (左手握柄上升沿) → AIMING → (左手握柄 或 5秒超时) �
 | 模式 | 显示 |
 |:----:|:-----|
 | 默认 | 🚢 船血 X/100 | 💰 金币 X | 🖐 如来神掌 | ⏳ 冷却X% |
-| AIMING | **180px 金色大数字**（黑描边，无框，占面板 70%） |
 | 抽卡中 | 🎴 选择增益 | 👇 触碰卡片 | 🔄 刷新[冷却Xs] |
 
 ### 17.3 2D 页面 UI
@@ -618,14 +627,14 @@ IDLE → (左手握柄上升沿) → AIMING → (左手握柄 或 5秒超时) �
 ## 19. 游戏状态机
 
 ```
-[桌面预览] → 点击"正常开始游戏"
+[桌面预览] → 点击"正常开始游戏"（或选关后进入）
       ↓
 [VR 会话请求] → isSessionSupported() → requestSession('immersive-vr')
       ↓ sessionstart 事件
-[attachAK48() / initAudio()] → 500ms → spawnBalloons()
+[attachAK48() / initAudio()] → 500ms → [选关则设置属性 + 解锁神掌] → spawnBalloons()
       ↓
 [波次 0: 分阶段生成]
-   ├─ 清空 → [抽卡(15s超时)] → waveNumber++ → 解锁神掌(if >=1) → 下一波
+   ├─ 清空 → [抽卡(15s超时)] → waveNumber++ → 下一波(选关后神掌已解锁) 
    └─ 撞船扣血 → shipHp≤0 → [gameOver()] → 1.5s → [restartLevel(保留wave)] → 赠抽卡
 ```
 
@@ -636,7 +645,8 @@ IDLE → (左手握柄上升沿) → AIMING → (左手握柄 或 5秒超时) �
 - `shipHp`: 船血量
 - `choiceCardsActive`: 是否抽卡中
 - `buddhaPalmReady`: 神掌是否解锁
-- `buddhaPalmState`: `IDLE` / `AIMING` / `SLAMMING`
+- `buddhaPalmState`: `IDLE`（握柄即释放，无瞄准状态)
+- `buddhaPalmUnlocked`: 选关时标记，模型加载后自动解锁
 - `playerStats`: `{hp, score, atk, gold}`
 - `fireRate`: 射速倍率（默认 1.0）
 - `multiShotChance`: 多重射击概率 %
@@ -684,11 +694,11 @@ IDLE → (左手握柄上升沿) → AIMING → (左手握柄 或 5秒超时) �
 | 模型 | 路径 | 用途 | 加载失败 |
 |:-----|:-----|:-----|:---------|
 | AK48 枪支 | `Model/Ak48.glb` | 主武器（挂载到手柄） | 显示错误提示 |
-| 气球船 | `Model/气球船.glb` | 热气球场景 | 静默跳过 |
+| 鲲鹏 | `Model/鲲鹏.glb` | 玩家乘坐的飞船模型 | 静默跳过 |
 | 骑士 | `Model/骑士.glb` | 精英敌人（克隆） | 降级为普通气球 |
 | 如来神掌 | `Model/如来神掌.glb` | 大招模型（克隆） | 不显示神掌 |
 | 火焰 | `Model/火焰.glb` | 预留 | 未加载 |
-| 鲲鹏 | `Model/鲲鹏.glb` | 预留 | 未加载 |
+| 气球船 | `Model/气球船.glb` | 已替换为鲲鹏 | 保留兼容 |
 
 All Draco 压缩，CDN 解压。15 秒加载超时自动隐藏 loading。
 
@@ -737,7 +747,7 @@ BALLOON_SPEED = 0.8;         // 敌人更快
 | 气球参数 | `BALLOON_HP` | core.js |
 | 骑士参数 | `KNIGHT_HP` | core.js |
 | 神掌全部 | `releaseBuddhaPalm` | game.js |
-| 神掌解锁 | `waveNumber >= 1` | game.js |
+| 神掌解锁 | `attachBuddhaPalmToLeft` | game.js |
 | 抽卡系统 | `spawnChoiceCards` | game.js |
 | 稀有度配置 | `RARITIES` | game.js |
 | AK48 枪支 | `AK48_SCALE` | core.js |
@@ -747,6 +757,10 @@ BALLOON_SPEED = 0.8;         // 敌人更快
 | 手柄输入 | `updateInputs` | vr.js |
 | 左手面板 | `updateLeftDebugPanel` | vr.js |
 | 日志 | `__log` | logger.js |
+| 左手射线球 | `leftRaySphere` | vr.js |
+| 可见射线 | `RAY_PITCH_ANGLE` | vr.js |
+| 选择卡跟随 | `updateChoiceCards` | game.js |
+| 选关按钮 | `selectedLevel` | index.html |
 
 ---
 
@@ -789,4 +803,4 @@ git push                       # 推送到 origin/master
 
 ---
 
-*文档生成时间: 2026-05-07 | 模块化架构 | Three.js r168 | WebXR immersive-vr*
+*文档生成时间: 2026-05-08 | 模块化架构 | Three.js r168 | WebXR immersive-vr*

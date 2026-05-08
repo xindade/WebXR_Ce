@@ -57,17 +57,66 @@ export const SHIP_COLLISION_RADIUS = 2.5;
 export const BALLOON_REPEL_FORCE = 3.0;
 export const SHIP_REPEL_FORCE = 2.0;
 
-export const CHOICE_CARD_DISTANCE = 0.75;
+// 选项卡参数
+export const CHOICE_CARD_DISTANCE = 1.75;     // 卡片距玩家距离（m）
+export const CHOICE_CARD_WIDTH = 0.5;          // 属性卡宽度（PlaneGeometry）
+export const CHOICE_CARD_HEIGHT = 0.3;         // 属性卡高度
+export const CHOICE_REFRESH_HEIGHT = 0.16;     // 刷新卡高度
+export const CHOICE_CARD_SPACING = 0.8;       // 属性卡左右间距（相邻卡中心距）
+export const CHOICE_REFRESH_OFFSET_Y = -0.25;  // 刷新卡相对属性卡组的下方偏移
+export const CHOICE_CARD_Y_OFFSET = -0.1;      // 卡片组相对相机Y轴偏移
+export const CHOICE_HIGHLIGHT_PULL = 0.1;      // 高亮时向玩家拉近距离
+export const CHOICE_HIGHLIGHT_SCALE = 1.2;     // 高亮时缩放倍数
+export const CHOICE_HIGHLIGHT_LERP = 10;       // 高亮缩放插值速度
+
+// 左手射线球参数
+export const RAY_SPHERE_RADIUS = 0.05;         // 射线球半径（直径0.3）
+// 射线球在左手柄局部坐标:
+//   x: 0       = 左右居中
+//   y: -0.05   = 略低于握柄中心
+//   z: -0.15   = 朝向手柄前方（远离玩家）
+export const RAY_SPHERE_POS = [0, -0.05, -0.15]; // 射线球在左手柄的局部坐标
+export const RAY_SPHERE_COLOR = 0x00ffff;      // 射线球颜色（青色）
+// 射线俯仰角度（度）:
+//   -30° = 向上偏30°（与子弹射击角度一致）
+//   正数 = 向下偏，负数 = 向上偏
+//   作用: 使射线从手柄向前方向略微上仰，方便瞄准正前方的选择卡片
+export const RAY_PITCH_ANGLE = 15;            // 射线俯仰角（度），与子弹一致
+export const RAY_CAST_DISTANCE = 5;            // 射线检测最大距离
 
 export const AK48_SCALE = 0.6;
-export const SHIP_SCALE = 7.0;
-export const SHIP_POS = [1, 1, 0.05];
+// 鲲鹏/飞船模型参数:
+//   SHIP_SCALE: 整体缩放倍数（7.0 = 放大7倍）
+//   SHIP_POS: [x, y, z] 场景中位置（米）
+//     x: 1    = 向右偏移1米
+//     y: 1    = 离地高度1米
+//     z: 0.05 = 前后微调（几乎居中）
+//   SHIP_ROT: [x, y, z] 欧拉旋转（弧度）
+//     x: 0     = 不旋转
+//     y: 1.57  ≈ 90° 绕Y轴旋转（模型正面朝前）
+//     z: 0     = 不旋转
+export const SHIP_SCALE = 18.0;
+export const SHIP_POS = [0, -3, 0.05];
 export const SHIP_ROT = [0, 1.57, 0];
 
 export const DEBRIS_COUNT = 30;
 export const DEBRIS_LIFE = 0.8;
 export const PARTICLE_COUNT = 50;
 export const PARTICLE_LIFE = 1.0;
+
+export const BUDDHA_COOLDOWN = 8;            // 神掌冷却时间（s）
+export const BUDDHA_HAND_SCALE = 0.2;         // 装备在左手柄的缩放
+export const BUDDHA_HAND_POS = [0, -0.08, 0.03]; // 装备在左手柄的位置
+export const BUDDHA_HAND_ROT_X = -Math.PI / 2;  // 装备在左手柄X轴旋转（平放）
+export const BUDDHA_KILL_RADIUS = 50;         // 落地杀伤半径（m，直接拉满）
+export const BUDDHA_DAMAGE = 1000;            // 落地伤害
+export const BUDDHA_FALL_DURATION = 0.5;      // 下落动画时长（s）
+export const BUDDHA_PARTICLE_COUNT = 20;      // 落地金色粒子数
+export const BUDDHA_FALL_START_SCALE = 2.0;   // 下落起始缩放
+export const BUDDHA_FALL_END_SCALE = 20.0;    // 下落结束缩放
+export const BUDDHA_FALL_HEIGHT = 20;         // 下落起始高度（相对玩家上方，m）
+export const BUDDHA_FALL_FORWARD = 3;         // 下落点在瞄准方向前方距离
+export const BUDDHA_IMPACT_CLEANUP = 0.3;     // 落地特效清理延迟（s）
 
 export const BOUND_X = 2;
 export const BOUND_Z = 4;
@@ -95,6 +144,7 @@ export const STATE = {
     selectedCardIndex: -1,
     cardHighlightTime: 0,
     choiceCardTimeout: null,
+    highlightedCardIndex: -1, // 当前射线指向的卡片索引（-1=无）
 
     prevLeftTrigger: false,
 
@@ -113,6 +163,7 @@ export const STATE = {
     rightController: null,
     leftGrip: null,
     rightGrip: null,
+    leftRaySphere: null,
 
     ak48Model: null,
     ak48Attached: false,
@@ -122,6 +173,15 @@ export const STATE = {
 
     lastRightShootTime: 0,
     lastLeftShootTime: 0,
+
+    buddhaPalmReady: false,
+    buddhaPalmUnlocked: false, // 选关时标记为true，模型加载后自动解锁
+    buddhaPalmState: 'IDLE',
+    buddhaPalmCooldown: 0,
+    buddhaPalmModel: null,
+    buddhaAimDirection: new THREE.Vector3(0, 0, -1),
+    buddhaPalmActiveList: [],
+    buddhaPrevGrip: false,
 
     skyTarget: 'day',
 
@@ -362,6 +422,9 @@ export function applySkyTarget(name) {
     STATE.skyTarget = name;
 }
 
+// 天空亮度因子（0=全暗, 1=全亮），气球/材质等据此动态调整
+export let skyBrightness = 1.0;
+
 export function updateSkyTransition(dt) {
     const p = skyPresets[STATE.skyTarget];
     const ease = 1 - Math.exp(-0.12 * dt);
@@ -386,6 +449,12 @@ export function updateSkyTransition(dt) {
     skyNow.sunElev += (p.sunElev - skyNow.sunElev) * ease;
     skyNow.moonElev += (p.moonElev - skyNow.moonElev) * ease;
     skyNow.moonAz += (p.moonAz - skyNow.moonAz) * ease;
+
+    // 更新全局亮度因子（基于环境光+太阳光综合亮度）
+    const maxAmbient = 1.2, maxSun = 2.5;
+    const rawBright = (skyNow.ambientI / maxAmbient + skyNow.sunI / maxSun) / 2;
+    skyBrightness += (rawBright - skyBrightness) * ease;
+    skyBrightness = Math.max(0, Math.min(1, skyBrightness));
 
     scene.background.copy(skyNow.bg);
     scene.fog.color.copy(skyNow.fog);
@@ -474,6 +543,9 @@ scene.add(particleGroup);
 
 export const debrisGroup = new THREE.Group();
 scene.add(debrisGroup);
+
+export const buddhaPalmGroup = new THREE.Group();
+scene.add(buddhaPalmGroup);
 
 export const choiceCardGroup = new THREE.Group();
 dolly.add(choiceCardGroup);

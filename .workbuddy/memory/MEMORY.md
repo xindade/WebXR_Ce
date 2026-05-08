@@ -34,10 +34,11 @@
 - **推送方式**: HTTPS（已配置 credential.helper 为 manager）
 
 ## 最新提交记录
-- `585d116` chore: update .gitignore
-- `be0a0e6` feat: add pico-vr-app Android native code
-- `5657ccd` feat: add pico-vr-app android build files
-- `4c2e489` feat: add pico-vr-app (web assets + config files)
+- `959545e` fix: 修复移除如来神掌后 setVR 未导出导致的全局错误
+- `9ddb657` refactor: 合并去重三份技术文档为两份
+- `a51abd0` docs: 全面更新技术文档
+- `3685257` feat: 模块化拆分 + PICO 4 兼容修复
+- `9f8dba3` feat: 气球碰撞系统 - 气球互斥防止重叠+船表面滑动碰撞
 
 ## 待办/问题记录
 - 模块化后 PICO 4 测试：黑屏 + 退出失效（尚未修复）
@@ -52,6 +53,11 @@
 - 模块间全部使用命名导入，**禁用 `import * as` 语法**（PICO 4 兼容性问题）
 - 跨模块依赖通过运行时注入（`setAudio()` / `setVR()`）解决，避免循环依赖
 
+## 代码变更检查规则
+- **跨文件改完后必须 grep 验证 import**：新增/修改常量、函数后，`rg "<标识符>" js/` 确认每个使用处都有对应 import
+- **ES Module 严格模式**：未声明变量直接 ReferenceError（不会静默失败），日志系统可即时捕获
+- **典型踩坑**：`vr.js` 调试面板用了 `BUDDHA_AIM_TIMEOUT` 但 import 只加了 `BUDDHA_COOLDOWN`（2026-05-08）
+
 ## 日志系统（2026-05-07）
 - 全局 `window.__log(msg, level)` 使用内存缓冲区，`index.html` 中用独立 `setInterval(200ms)` 刷新
 - 日志级别：`s`(✅绿色) `i`(🔹蓝色) `w`(⚠️黄色) `e`(❌红色)
@@ -59,4 +65,4 @@
 - 左侧 42vw × 100vh 面板，z-index:50，最新 200 条
 
 ---
-_最后更新: 2026-05-07_
+_最后更新: 2026-05-08_
