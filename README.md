@@ -97,4 +97,4 @@ A: 检查 `Model/` 目录是否存在对应 `.glb` 文件。
 
 ---
 
-> 📅 最后更新: 2026-05-08 | Three.js r168+ | WebXR immersive-vr
+> 📅 最后更新: 2026-05-09 | Three.js r168+ | WebXR immersive-vr

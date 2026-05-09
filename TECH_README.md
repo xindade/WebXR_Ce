@@ -1,6 +1,6 @@
 # VR 热气球射击游戏 — 技术文档
 
-> 最后更新: 2026-05-08 | 入口: `index.html` + `js/` 模块 | Three.js r168 ES Module + WebXR
+> 最后更新: 2026-05-09 | 入口: `index.html` + `js/` 模块 | Three.js r168 ES Module + WebXR
 
 ---
 
@@ -8,9 +8,9 @@
 
 **WebXR_Ce** 是一款基于 Three.js + WebXR 的 VR 热气球射击游戏，目标平台为 **PICO 4 VR 头显**（浏览器 Chrome/105）。
 
-玩家站在热气球托盘（气球船）上，使用 AK48 枪支射击从四周涌来的气球敌人，通过波次战斗、稀有度抽卡升级、如来神掌清屏大招等机制推进游戏。
+玩家站在鲲鹏飞船上，使用 AK48 枪支射击从四周涌来的气球敌人，通过波次战斗、稀有度抽卡升级、如来神掌清屏大招、云朵转场等机制推进游戏。
 
-- **入口**: `index.html`（~393行）+ `js/core.js` / `js/game.js` / `js/vr.js` / `js/logger.js`（总计约 2500 行）
+- **入口**: `index.html`（~400行）+ `js/core.js` / `js/game.js` / `js/vr.js` / `js/logger.js`（总计约 2600 行）
 - **部署**: GitHub Pages（`https://github.com/xindade/WebXR_Ce.git`）
 - **测试设备**: PICO 4 VR 头显
 - **开发服务器**: Node.js HTTPS 端口 3443 / HTTP 端口 3000
@@ -39,9 +39,9 @@
 | 文件 | 行数 | 职责 |
 |:-----|:----:|:-----|
 | `js/logger.js` | ~65 | 独立日志（`<script>` 同步加载，ES Module 前执行） |
-| `js/core.js` | ~600 | 常量、共享状态 STATE、Three.js 核心（渲染器/场景/相机）、灯光、天空、云朵、容器 |
-| `js/game.js` | ~1060 | 子弹、气球、波次生成、碰撞、抽卡、如来神掌、特效（碎片/粒子） |
-| `js/vr.js` | ~500 | 音效、模型加载、手柄、枪支挂载、输入处理、UI 面板、左手射线球/射线 |
+| `js/core.js` | ~620 | 常量、共享状态 STATE、Three.js 核心（渲染器/场景/相机）、灯光、天空、云朵、容器、云转场配置 |
+| `js/game.js` | ~1200 | 子弹、气球、波次、碰撞、抽卡、如来神掌、特效、云朵转场 |
+| `js/vr.js` | ~540 | 音效、模型加载、手柄、枪支/后坐力、输入处理、UI 面板、左手射线球/射线 |
 
 ### 3.2 模块间依赖与注入
 
@@ -150,6 +150,7 @@ Scene (world space)
 ├── debrisGroup                         ← 碎片对象池 (30个)
 ├── cloud groups × 12                   ← 白色球体组，世界空间固定
 ├── shipModel (鲲鹏.glb)                ← 玩家乘坐的鲲鹏模型
+├── transitionCloudGroup (Group)        ← 5朵转场云（4个角+正前方15m）
 ├── buddhaPalmActiveList[]              ← 飞行/下落中的神掌
 │
 └── dolly (Group)                       ← 玩家移动根节点
@@ -265,10 +266,19 @@ Scene (world space)
 |:-----|:---:|:-----|
 | `AK48_SCALE` | 0.6 | 整体缩放 |
 | 右手位置 | (0, -0.1, 0.01) | 相对右手柄（代码中 gunInstance.position） |
-| 右手旋转 | x=-20°, y=90° | 弧度 |
+| 右手旋转 | x=-20rad, y=90° | 弧度（-20rad ≈ -66° 有效倾角） |
 | 左手位置 | (0, -0.1, 0.01) | 同上 |
-| 左手旋转 | x=-20°, y=-90° | 弧度 |
+| 左手旋转 | x=-20rad, y=-90° | 弧度 |
 | 左手镜像 | scale.x = -0.6 | X 轴翻转 |
+
+### 6.10 枪支后坐力
+
+| 参数 | 值 | 说明 |
+|:-----|:---:|:-----|
+| `RECOIL_ROT_AMPLITUDE` | 0.08 | 单次射击旋转偏移（弧度） |
+| `RECOIL_DECAY` | 0.80 | 每帧衰减系数（越小回弹越快） |
+
+后坐力采用纯旋转方式（位置不变），枪口上跳（减少 `rotation.x` 负值），避免平移方向感知歧义。低射速时后坐力明显，高射速时轻微。
 
 ---
 
@@ -464,9 +474,10 @@ b.position.x += pushX; b.position.z += pushZ;
 - **左手射线选择**: 左手柄青色发光小球发射可见射线（与子弹同角度 -30° 上仰），射线指向的卡片高亮（移近 0.1m + 缩放 1.2x）
 - 属性卡和刷新卡均支持高亮反馈
 - 扳机确认选择（上升沿检测，避免持续触发）
-- 3 张属性卡横向排列，间距 `CHOICE_CARD_SPACING=0.8m`
-- 刷新卡在下方 `CHOICE_REFRESH_OFFSET_Y=-0.25m`
-- 所有卡片跟随头显（每帧重算位置），始终在玩家正前方
+- 3 张属性卡横向排列，间距 `CHOICE_CARD_SPACING=0.6m`
+- 刷新卡在下方 `CHOICE_REFRESH_OFFSET_Y=-0.35m`
+- 所有卡片固定在**出生点正前方**（不随头显旋转），始终面朝 -Z 方向
+- 选卡期间玩家只能往出生点后方 1m 范围内活动
 - 15 秒超时自动跳过
 
 ### 12.6 波次推进
@@ -536,6 +547,37 @@ IDLE → (左手握柄上升沿 + 冷却结束) → 直接释放（无瞄准状�
    - 落地后半径 50m 内气球扣 1000 HP
    - 金色粒子爆炸
    - 冷却 8s 后可再次使用
+
+---
+
+## 14.5 云朵转场系统
+
+### 14.5.1 触发
+
+```
+打完一关 → checkAllBalloonsDestroyed() → startCloudTransition()
+  ↓
+所有云向 +Z 移动 → Z>300 消失 → 重置到 Z=-320 重新移入
+  ↓
+新云朵移到目标位置（4个角+正前方）→ 转场完成
+```
+
+### 14.5.2 云朵组成
+
+| 类型 | 数量 | 位置 | 行为 |
+|:----|:---:|:-----|:-----|
+| 转场云 | 5 | 4个角(xz=±15) + 正前方(0,-15) | 打完一关后向+Z移动 |
+| 静态装饰云 | 12 | 场景各地 | 转场时同步向+Z移动（速度×1.2） |
+
+### 14.5.3 全部参数
+
+| 参数 | 值 | 说明 |
+|:-----|:---:|:-----|
+| `TRANSITION_SPEED` | 50 | 移动速度（m/s） |
+| `TRANSITION_DISAPPEAR_Z` | 300 | 消失Z坐标（旧50改300） |
+| `TRANSITION_SPAWN_Z` | -320 | 重生Z坐标（旧-55改-320） |
+| `TRANSITION_CLOUD_Y` | 5 | 云朵高度（m） |
+| `TRANSITION_CLOUD_SCALE` | 2 | 云朵大小 |
 
 ---
 
@@ -634,7 +676,7 @@ IDLE → (左手握柄上升沿 + 冷却结束) → 直接释放（无瞄准状�
 [attachAK48() / initAudio()] → 500ms → [选关则设置属性 + 解锁神掌] → spawnBalloons()
       ↓
 [波次 0: 分阶段生成]
-   ├─ 清空 → [抽卡(15s超时)] → waveNumber++ → 下一波(选关后神掌已解锁) 
+   ├─ 清空 → [抽卡(15s超时)] → [nextWaveTimer=1s] → waveNumber++ → 下一波
    └─ 撞船扣血 → shipHp≤0 → [gameOver()] → 1.5s → [restartLevel(保留wave)] → 赠抽卡
 ```
 
@@ -759,8 +801,13 @@ BALLOON_SPEED = 0.8;         // 敌人更快
 | 日志 | `__log` | logger.js |
 | 左手射线球 | `leftRaySphere` | vr.js |
 | 可见射线 | `RAY_PITCH_ANGLE` | vr.js |
-| 选择卡跟随 | `updateChoiceCards` | game.js |
+| 选择卡固定 | `updateChoiceCards` | game.js |
 | 选关按钮 | `selectedLevel` | index.html |
+| 后坐力 | `updateGunRecoil` | vr.js |
+| 后坐力参数 | `RECOIL_ROT_AMPLITUDE` | core.js |
+| 云朵转场 | `updateTransitionClouds` | game.js |
+| 转场参数 | `TRANSITION_SPEED` | core.js |
+| 波次过渡 | `nextWaveTimer` | game.js |
 
 ---
 
@@ -803,4 +850,4 @@ git push                       # 推送到 origin/master
 
 ---
 
-*文档生成时间: 2026-05-08 | 模块化架构 | Three.js r168 | WebXR immersive-vr*
+*文档生成时间: 2026-05-09 | 模块化架构 | Three.js r168 | WebXR immersive-vr*
