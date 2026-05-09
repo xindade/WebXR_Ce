@@ -267,6 +267,8 @@
                         vr.handleExit();
                         game.checkVRSkySwitch();
                     }
+                    vr.updateGunRecoil();
+                    game.updateTransitionClouds(dt);
                     game.updateDebris(dt);
                     game.updateParticles(dt);
                     if (!animate._frameCount) animate._frameCount = 0;
@@ -302,6 +304,8 @@
             try {
                 vr.setupController(0);
                 vr.setupController(1);
+                game.initTransitionClouds();
+                window.__log('☁️ 转场云朵初始化', 's');
             } catch (e) {
                 console.error('Init error:', e);
                 statusMsgEl.innerHTML = '❌ 初始化错误: ' + e.message;
@@ -327,12 +331,7 @@
                         STATE.playerStats.gold = 1000;
                         STATE.playerStats.atk = 100;
                         STATE.waveNumber = selectedLevel - 1;
-                        STATE.buddhaPalmUnlocked = true;
                         window.__log('关卡' + selectedLevel + ' 生效: gold=' + STATE.playerStats.gold + ' atk=' + STATE.playerStats.atk + ' wave=' + STATE.waveNumber, 's');
-                        // 模型已在初始化时加载，同步解锁如来神掌
-                        if (STATE.buddhaPalmModel && STATE.leftGrip) {
-                            game.attachBuddhaPalmToLeft();
-                        }
                     }
                     game.spawnBalloons();
                     window.__log('游戏开始 / 气球生成', 's');
@@ -356,11 +355,18 @@
             STATE.leftHandGunEnabled = false;
             STATE.ak48Attached = false;
             STATE.ak48LeftAttached = false;
+            STATE.ak48Mesh = null;
+            STATE.gunRecoilPos = 0;
+            STATE.gunRecoilRot = 0;
             STATE.choiceCardsActive = false;
             STATE.choiceRefreshCount = 0;
             game.resetBuddhaPalm();
             STATE.buddhaPalmReady = false;
             STATE.buddhaPalmUnlocked = false;
+            STATE.transitionCloudActive = false;
+            STATE.transitionCloudPhase = 0;
+            STATE.nextWaveTimer = 0;
+            game.initTransitionClouds();
             selectedLevel = 0;
             if (STATE.choiceCardTimeout) { clearTimeout(STATE.choiceCardTimeout); STATE.choiceCardTimeout = null; }
             // 清除选择卡

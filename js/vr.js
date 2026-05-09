@@ -8,6 +8,7 @@ import {
     SPAWN_MAX_ACTIVE, SHIP_MAX_HP,
     BUDDHA_COOLDOWN,
     RAY_SPHERE_RADIUS, RAY_SPHERE_POS, RAY_SPHERE_COLOR, RAY_PITCH_ANGLE,
+    RECOIL_POS_AMPLITUDE, RECOIL_ROT_AMPLITUDE, RECOIL_DECAY,
     roundRect
 } from './core.js';
 import { shootBullet, attachBuddhaPalmToLeft } from './game.js';
@@ -214,6 +215,9 @@ export function attachAK48() {
     gunInstance.rotation.y = Math.PI / 2;
     STATE.rightGrip.add(gunInstance);
     STATE.ak48Attached = true;
+    STATE.ak48Mesh = gunInstance;
+    STATE.ak48BasePos = new THREE.Vector3(0, -0.1, 0.01);
+    STATE.ak48BaseRot = new THREE.Vector3(-20, Math.PI / 2, 0);
 }
 
 export function attachAK48ToLeft() {
@@ -339,6 +343,10 @@ export function handleShooting() {
             playShootSound();
             shootBullet(STATE.rightController);
             STATE.lastRightShootTime = now;
+            // 后坐力：低射速明显，高射速轻微
+            const intensity = Math.min(1.0, 1.0 / Math.max(0.3, STATE.fireRate));
+            STATE.gunRecoilPos += RECOIL_POS_AMPLITUDE * intensity;
+            STATE.gunRecoilRot += RECOIL_ROT_AMPLITUDE * intensity;
         }
     }
     if (STATE.leftHandGunEnabled && STATE.leftController && STATE.leftTrigger) {
@@ -349,6 +357,22 @@ export function handleShooting() {
             STATE.lastLeftShootTime = now;
         }
     }
+}
+
+// 每帧更新后坐力回弹
+export function updateGunRecoil() {
+    if (!STATE.ak48Mesh || !STATE.ak48BasePos) return;
+    // 衰减回弹
+    STATE.gunRecoilPos *= RECOIL_DECAY;
+    STATE.gunRecoilRot *= RECOIL_DECAY;
+    if (Math.abs(STATE.gunRecoilPos) < 0.0001) STATE.gunRecoilPos = 0;
+    if (Math.abs(STATE.gunRecoilRot) < 0.0001) STATE.gunRecoilRot = 0;
+    // 位置保持基准不变（纯旋转后坐力，避免平移的方向歧义）
+    STATE.ak48Mesh.position.copy(STATE.ak48BasePos);
+    // 旋转后坐力：枪口上跳（减少rotation.x负值，使枪管抬升）
+    STATE.ak48Mesh.rotation.x = STATE.ak48BaseRot.x + STATE.gunRecoilRot;
+    STATE.ak48Mesh.rotation.y = STATE.ak48BaseRot.y;
+    STATE.ak48Mesh.rotation.z = 0;
 }
 
 export function handleMovement(dt) {
@@ -368,7 +392,12 @@ export function handleMovement(dt) {
     const dx = (forward.x * sy + right.x * sx) * speed;
     const dz = (forward.z * sy + right.z * sx) * speed;
     dolly.position.x = Math.max(-BOUND_X, Math.min(BOUND_X, dolly.position.x + dx));
-    dolly.position.z = Math.max(-BOUND_Z, Math.min(BOUND_Z, dolly.position.z + dz));
+    const dzNew = dolly.position.z + dz;
+    dolly.position.z = Math.max(-BOUND_Z, Math.min(BOUND_Z, dzNew));
+    // 选卡期间：限制玩家只能往出生点之后1米活动
+    if (STATE.choiceCardsActive && STATE.choiceCardSpawnZ !== undefined) {
+        dolly.position.z = Math.max(STATE.choiceCardSpawnZ, Math.min(STATE.choiceCardSpawnZ + 1.0, dolly.position.z));
+    }
 }
 
 export function handleExit() {
@@ -506,5 +535,6 @@ export const VrAPI = {
     attachAK48, attachAK48ToLeft,
     setupController, controllers,
     updateInputs, handleShooting, handleMovement, handleExit,
-    updateDebugPanel, updateLeftDebugPanel
+    updateDebugPanel, updateLeftDebugPanel,
+    updateGunRecoil
 };

@@ -24,7 +24,10 @@ import {
     BUDDHA_HAND_SCALE, BUDDHA_HAND_POS, BUDDHA_HAND_ROT_X,
     BUDDHA_FALL_START_SCALE, BUDDHA_FALL_END_SCALE, BUDDHA_FALL_HEIGHT, BUDDHA_FALL_FORWARD, BUDDHA_IMPACT_CLEANUP,
     BOUND_X, BOUND_Z, balloonTex, buddhaPalmGroup,
-    applySkyTarget, skyCycle, skyBrightness
+    applySkyTarget, skyCycle, skyBrightness,
+    createCloud, clouds,
+    TRANSITION_CLOUD_POSITIONS, TRANSITION_CLOUD_Y, TRANSITION_CLOUD_SCALE,
+    TRANSITION_SPEED, TRANSITION_DISAPPEAR_Z, TRANSITION_SPAWN_Z
 } from './core.js';
 
 // ===================== 子弹系统 =====================
@@ -187,6 +190,7 @@ export function spawnBalloons() {
     STATE.wavePhase = 1;
     STATE.spawnBatchTimer = 0;
 
+    window.__log('🎈 第' + STATE.waveNumber + '波开始，目标生成 ' + totalSpawns + ' 个气球', 's');
     console.log(`🎈 第${STATE.waveNumber}波开始，目标生成 ${totalSpawns} 个气球`);
 }
 
@@ -217,7 +221,6 @@ function spawnOneBalloon() {
 
     if (isKnight) {
         createKnightBalloon(x, y, z);
-        // 骑士左右各跟一个普通气球
         const offsetDist = 1.2;
         createBalloon(x - offsetDist, y, z);
         createBalloon(x + offsetDist, y, z);
@@ -339,7 +342,7 @@ export function updateBalloons(dt) {
             b.visible = false;
             STATE.shipHp -= BALLOON_DAMAGE;
             STATE.shipHitFlash = 0.3;
-            const debrisColor = b.userData.isKnight ? 0x888888 : (b.material.color ? b.material.color.getHex() : 0xff4444);
+            const debrisColor = b.userData.isKnight ? 0x888888 : 0xff4444;
             spawnDebris(b.position.clone(), debrisColor, b.userData.isKnight ? 12 : 8);
             spawnParticles(b.position.clone(), 0xff4444, 15);
             playPop();
@@ -350,6 +353,10 @@ export function updateBalloons(dt) {
                 gameOver();
             }
         }
+    }
+    // 安全兜底：波次完成后自动推进（仅游戏进行中且无过渡计时器时）
+    if (STATE.gameStarted && STATE.nextWaveTimer === 0) {
+        checkAllBalloonsDestroyed();
     }
 }
 
@@ -400,7 +407,106 @@ export function checkBulletBalloonCollisions() {
 export function checkAllBalloonsDestroyed() {
     const activeBalloons = balloons.filter(b => b.userData.active);
     if (activeBalloons.length === 0 && STATE.waveSpawnRemaining <= 0 && !STATE.choiceCardsActive) {
+        // 触发云朵转场
+        if (!STATE.transitionCloudActive) {
+            startCloudTransition();
+        }
         spawnChoiceCards();
+    }
+}
+
+// ===================== 云朵转场系统 =====================
+// 5朵云：4个角 + 正前方15m，打完一关后向玩家后方移动（转场效果）
+
+export function initTransitionClouds() {
+    if (STATE.transitionCloudGroup) {
+        scene.remove(STATE.transitionCloudGroup);
+        STATE.transitionCloudGroup.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
+    }
+    const group = new THREE.Group();
+    TRANSITION_CLOUD_POSITIONS.forEach((pos, i) => {
+        const cloud = createCloud(pos[0], TRANSITION_CLOUD_Y, pos[1], TRANSITION_CLOUD_SCALE);
+        cloud.userData.transitionIdx = i;
+        cloud.userData.targetZ = pos[1]; // 目标Z位置
+        group.add(cloud);
+    });
+    scene.add(group);
+    STATE.transitionCloudGroup = group;
+    STATE.transitionCloudActive = false;
+    STATE.transitionCloudPhase = 0;
+    window.__log('☁️ 转场云朵初始化完成', 's');
+}
+
+export function startCloudTransition() {
+    if (!STATE.transitionCloudGroup) return;
+    STATE.transitionCloudActive = true;
+    STATE.transitionCloudPhase = 1; // 移出阶段
+    // 记录每个云的起始Z位置（当前Z）
+    STATE.transitionCloudGroup.children.forEach(cloud => {
+        cloud.userData.startZ = cloud.position.z;
+        cloud.userData.phase = 'out';
+    });
+    // 记录静态装饰云的起始位置，用于转场移动
+    clouds.forEach((cloud, i) => {
+        if (!cloud.userData.origPos) {
+            cloud.userData.origPos = cloud.position.clone();
+        }
+    });
+    window.__log('☁️ 云朵转场开始（含' + clouds.length + '朵装饰云）', 's');
+}
+
+export function updateTransitionClouds(dt) {
+    if (!STATE.transitionCloudActive || !STATE.transitionCloudGroup) return;
+    const children = STATE.transitionCloudGroup.children;
+    let allDone = true;
+
+    if (STATE.transitionCloudPhase === 1) {
+        // 移出阶段：所有云向 +Z 方向移动
+        children.forEach(cloud => {
+            cloud.position.z += TRANSITION_SPEED * dt;
+            cloud.position.x += Math.sin(performance.now() * 0.001 + cloud.userData.transitionIdx) * 0.3 * dt; // 轻微横漂
+            if (cloud.position.z < TRANSITION_DISAPPEAR_Z) allDone = false;
+        });
+        // 静态装饰云同步向 +Z 移动
+        clouds.forEach(cloud => {
+            cloud.position.z += TRANSITION_SPEED * dt * 1.2; // 稍快一点，增强流动感
+        });
+        if (allDone) {
+            STATE.transitionCloudPhase = 2; // 进入移入阶段
+            // 重置转场云位置到远处
+            children.forEach(cloud => {
+                const pos = TRANSITION_CLOUD_POSITIONS[cloud.userData.transitionIdx];
+                cloud.position.set(pos[0], TRANSITION_CLOUD_Y, TRANSITION_SPAWN_Z);
+            });
+            // 重置静态装饰云到原始位置
+            clouds.forEach(cloud => {
+                if (cloud.userData.origPos) {
+                    cloud.position.copy(cloud.userData.origPos);
+                }
+            });
+            window.__log('☁️ 新云朵移入中', 's');
+        }
+    }
+
+    if (STATE.transitionCloudPhase === 2) {
+        // 移入阶段：云朵从远处移到目标位置
+        allDone = true;
+        children.forEach(cloud => {
+            const targetZ = cloud.userData.targetZ;
+            const diff = targetZ - cloud.position.z;
+            if (Math.abs(diff) > 0.3) {
+                cloud.position.z += Math.sign(diff) * TRANSITION_SPEED * dt;
+                cloud.position.x += Math.sin(performance.now() * 0.0012 + cloud.userData.transitionIdx * 2) * 0.2 * dt;
+                allDone = false;
+            } else {
+                cloud.position.z = targetZ;
+            }
+        });
+        if (allDone) {
+            STATE.transitionCloudActive = false;
+            STATE.transitionCloudPhase = 0;
+            window.__log('☁️ 云朵转场完成', 's');
+        }
     }
 }
 
@@ -544,18 +650,18 @@ export function spawnChoiceCards() {
         choiceCardGroup.remove(child);
     }
 
-    // 记录相机变换基准，用于每帧跟随
+    // 记录出生点基准（固定位置，不随头显旋转）
+    const spawnAnchor = dolly.position.clone();
     STATE.choiceCardBase = {
-        pos: camera.position.clone(),
-        forward: new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion),
-        right: new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion),
+        pos: spawnAnchor.clone(),
+        forward: new THREE.Vector3(0, 0, -1), // 固定朝-Z（出生点正前方）
+        right: new THREE.Vector3(1, 0, 0),
     };
-    STATE.choiceCardBase.forward.y = 0;
-    STATE.choiceCardBase.forward.normalize();
-    STATE.choiceCardBase.right.y = 0;
-    STATE.choiceCardBase.right.normalize();
     const base = STATE.choiceCardBase;
-    const camY = camera.position.y + CHOICE_CARD_Y_OFFSET;
+    const cardY = spawnAnchor.y + 1.6 + CHOICE_CARD_Y_OFFSET; // 眼高+偏移
+
+    // 记录选择卡期间的活动限制（出生点往后1米）
+    STATE.choiceCardSpawnZ = spawnAnchor.z;
 
     // faceTarget 用相机位置（卡片始终面向玩家）
     const faceTarget = camera.position.clone();
@@ -567,7 +673,7 @@ export function spawnChoiceCards() {
         const offsetX = (i - 1) * CHOICE_CARD_SPACING;
         // 记录局部偏移，每帧用当前相机重算世界坐标
         card.userData.cardOffset = { offsetX, offsetY: 0, offsetZ: CHOICE_CARD_DISTANCE };
-        _repositionCard(card, base, camY);
+        _repositionCard(card, base, cardY);
         card.lookAt(faceTarget);
         choiceCardGroup.add(card);
     }
@@ -575,7 +681,7 @@ export function spawnChoiceCards() {
     // 刷新卡（在属性卡下方）
     const refreshCard = createRefreshCard();
     refreshCard.userData.cardOffset = { offsetX: 0, offsetY: CHOICE_REFRESH_OFFSET_Y, offsetZ: CHOICE_CARD_DISTANCE };
-    _repositionCard(refreshCard, base, camY);
+    _repositionCard(refreshCard, base, cardY);
     refreshCard.lookAt(faceTarget);
     choiceCardGroup.add(refreshCard);
 
@@ -602,17 +708,11 @@ const _raycaster = new THREE.Raycaster();
 
 export function updateChoiceCards(dt) {
     if (!STATE.choiceCardsActive || choiceCardGroup.children.length === 0) return;
-    // 每帧用当前相机方向更新基准
+    // 使用固定锚点（出生点），不随头显旋转
     const base = STATE.choiceCardBase;
     if (!base) return;
-    base.pos.copy(camera.position);
-    const f = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-    f.y = 0; f.normalize();
-    base.forward.copy(f);
-    const r = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-    r.y = 0; r.normalize();
-    base.right.copy(r);
-    const camY = camera.position.y + CHOICE_CARD_Y_OFFSET;
+    // 不更新 base.pos/forward/right — 卡位固定
+    const cardY = base.pos.y + 1.6 + CHOICE_CARD_Y_OFFSET;
     const faceTarget = camera.position.clone();
 
     // ---- 射线检测：左手球指向哪张卡片 ----
@@ -636,8 +736,7 @@ export function updateChoiceCards(dt) {
 
     // ---- 更新每张卡片的位置 + 高亮动画 ----
     choiceCardGroup.children.forEach((card, idx) => {
-        _repositionCard(card, base, camY);
-        card.lookAt(faceTarget);
+        _repositionCard(card, base, cardY);
 
         // 高亮处理：被射线指向的卡片向玩家靠近并放大（属性卡+刷新卡）
         const isHighlighted = (idx === hitCardIndex && (card.userData.isChoiceCard || card.userData.isRefreshCard));
@@ -667,15 +766,9 @@ export function clearChoiceCards() {
         child.geometry.dispose();
         choiceCardGroup.remove(child);
     }
-    setTimeout(() => {
-        STATE.waveNumber++;
-        // 打完第0波后解锁如来神掌
-        if (STATE.waveNumber >= 1 && !STATE.buddhaPalmReady) {
-            attachBuddhaPalmToLeft();
-        }
-        spawnBalloons();
-        console.log('🎈 第' + STATE.waveNumber + '波气球已生成（含骑士:' + (STATE.waveNumber >= 1 ? '是' : '否') + '）');
-    }, 1000);
+    // 用游戏循环计时替代 setTimeout（更可靠）
+    STATE.nextWaveTimer = 1.0;
+    window.__log('⏱️ 下一波将在1秒后开始', 'i');
 }
 
 export function checkLeftHandChoiceCardCollision() {
@@ -849,6 +942,19 @@ export function updateCooldowns(dt) {
     // 冷却结束瞬间刷新贴图（显示"刷新"而非"冷却0s"）
     if (prevCd > 0 && STATE.choiceRefreshCooldown <= 0 && STATE.choiceCardsActive) {
         updateRefreshCardTexture();
+    }
+    // 波次过渡倒计时
+    if (STATE.nextWaveTimer > 0) {
+        STATE.nextWaveTimer -= dt;
+        if (STATE.nextWaveTimer <= 0) {
+            STATE.nextWaveTimer = 0;
+            STATE.waveNumber++;
+            if (STATE.waveNumber >= 1 && !STATE.buddhaPalmReady) {
+                attachBuddhaPalmToLeft();
+            }
+            spawnBalloons();
+            window.__log('🎈 第' + STATE.waveNumber + '波气球已生成', 's');
+        }
     }
 }
 
@@ -1045,5 +1151,6 @@ export const GameAPI = {
     updateDebris, updateParticles, checkVRSkySwitch,
     spawnBalloons, restartLevel, gameOver,
     updateBuddhaPalm, attachBuddhaPalmToLeft, resetBuddhaPalm,
+    initTransitionClouds, updateTransitionClouds, startCloudTransition,
     balloons, bullets
 };

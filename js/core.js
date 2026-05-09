@@ -57,16 +57,25 @@ export const SHIP_COLLISION_RADIUS = 2.5;
 export const BALLOON_REPEL_FORCE = 3.0;
 export const SHIP_REPEL_FORCE = 2.0;
 
-// 选项卡参数
-export const CHOICE_CARD_DISTANCE = 1.75;     // 卡片距玩家距离（m）
-export const CHOICE_CARD_WIDTH = 0.5;          // 属性卡宽度（PlaneGeometry）
-export const CHOICE_CARD_HEIGHT = 0.3;         // 属性卡高度
+// 选项卡参数（固定在出生点正前方，不随头显旋转）
+//   DISTANCE — 卡片距出生点的距离（米），沿 -Z 方向
+//   WIDTH/HEIGHT — 属性卡 PlaneGeometry 尺寸
+//   REFRESH_HEIGHT — 刷新卡高度（比属性卡矮，便于区分）
+//   SPACING — 相邻属性卡中心间距（米），增大 = 卡更分散
+//   REFRESH_OFFSET_Y — 刷新卡相对属性卡组的 Y 偏移（负值 = 下方）
+//   CARD_Y_OFFSET — 卡片组整体 Y 偏移（相对眼高 1.6m 的微调）
+//   HIGHLIGHT_PULL — 高亮时向玩家方向拉近的距离（米）
+//   HIGHLIGHT_SCALE — 高亮时的缩放倍数
+//   HIGHLIGHT_LERP — 高亮缩放插值速度（越大越快）
+export const CHOICE_CARD_DISTANCE = 1.75;     // 卡片距出生点距离（m）
+export const CHOICE_CARD_WIDTH = 0.5;          // 属性卡宽度
+export const CHOICE_CARD_HEIGHT = 0.5;         // 属性卡高度
 export const CHOICE_REFRESH_HEIGHT = 0.16;     // 刷新卡高度
-export const CHOICE_CARD_SPACING = 0.8;       // 属性卡左右间距（相邻卡中心距）
-export const CHOICE_REFRESH_OFFSET_Y = -0.25;  // 刷新卡相对属性卡组的下方偏移
-export const CHOICE_CARD_Y_OFFSET = -0.1;      // 卡片组相对相机Y轴偏移
-export const CHOICE_HIGHLIGHT_PULL = 0.1;      // 高亮时向玩家拉近距离
-export const CHOICE_HIGHLIGHT_SCALE = 1.2;     // 高亮时缩放倍数
+export const CHOICE_CARD_SPACING = 0.6;        // 属性卡左右间距
+export const CHOICE_REFRESH_OFFSET_Y = -0.35;  // 刷新卡Y偏移（下方）
+export const CHOICE_CARD_Y_OFFSET = -0.1;      // 卡片Y整体微调
+export const CHOICE_HIGHLIGHT_PULL = 0.1;      // 高亮拉近距离
+export const CHOICE_HIGHLIGHT_SCALE = 1.2;     // 高亮缩放倍数
 export const CHOICE_HIGHLIGHT_LERP = 10;       // 高亮缩放插值速度
 
 // 左手射线球参数
@@ -85,6 +94,15 @@ export const RAY_PITCH_ANGLE = 15;            // 射线俯仰角（度），与�
 export const RAY_CAST_DISTANCE = 5;            // 射线检测最大距离
 
 export const AK48_SCALE = 0.6;
+// 枪支后坐力参数:
+//   AK48 挂载在右手柄，rotation.y = PI/2（枪口朝右+90°）
+//   后坐力采用纯旋转方式（不平移，避免方向歧义）
+//   RECOIL_ROT_AMPLITUDE — 单次射击旋转偏移量（弧度），越大枪口跳越高
+//   RECOIL_DECAY         — 每帧衰减系数（0~1），越小回弹越快
+//   低射速(fireRate=1) 时后坐力明显，高射速(fireRate=5) 时后坐力轻微
+export const RECOIL_POS_AMPLITUDE = 0.03;  // 位置偏移幅度（米，已停用）
+export const RECOIL_ROT_AMPLITUDE = 0.08;  // 旋转偏移幅度（弧度）
+export const RECOIL_DECAY = 0.80;           // 衰减系数/帧
 // 鲲鹏/飞船模型参数:
 //   SHIP_SCALE: 整体缩放倍数（7.0 = 放大7倍）
 //   SHIP_POS: [x, y, z] 场景中位置（米）
@@ -97,7 +115,7 @@ export const AK48_SCALE = 0.6;
 //     z: 0     = 不旋转
 export const SHIP_SCALE = 18.0;
 export const SHIP_POS = [0, -3, 0.05];
-export const SHIP_ROT = [0, 1.57, 0];
+export const SHIP_ROT = [0, -1.57, 0];
 
 export const DEBRIS_COUNT = 30;
 export const DEBRIS_LIFE = 0.8;
@@ -145,6 +163,7 @@ export const STATE = {
     cardHighlightTime: 0,
     choiceCardTimeout: null,
     highlightedCardIndex: -1, // 当前射线指向的卡片索引（-1=无）
+    choiceCardSpawnZ: 0,     // 选卡时记录出生点Z，用于限制后退范围
 
     prevLeftTrigger: false,
 
@@ -167,6 +186,11 @@ export const STATE = {
 
     ak48Model: null,
     ak48Attached: false,
+    ak48Mesh: null,          // 右手枪支网格引用（用于后坐力）
+    ak48BasePos: null,       // 枪支基准位置
+    ak48BaseRot: null,       // 枪支基准旋转
+    gunRecoilPos: 0,         // 后坐力位置偏移
+    gunRecoilRot: 0,         // 后坐力旋转偏移
     ak48LeftAttached: false,
     shipModel: null,
     knightModel: null,
@@ -193,6 +217,13 @@ export const STATE = {
 
     loadingResources: { texture: false, model: false },
     loadingHidden: false,
+
+    // 云朵转场
+    transitionCloudActive: false,
+    transitionCloudGroup: null,
+    transitionCloudPhase: 0, // 0=静止, 1=移出, 2=移入
+    transitionCloudTimer: 0,
+    nextWaveTimer: 0,       // 波次过渡倒计时(s)，取代 setTimeout
 };
 
 // ===================== Three.js 核心 =====================
@@ -503,7 +534,7 @@ export function updateSkyTransition(dt) {
 }
 
 // ===================== 云朵装饰 =====================
-function createCloud(x, y, z, scale = 1) {
+export function createCloud(x, y, z, scale = 1) {
     const cloudGroup = new THREE.Group();
     const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
     const spheres = [
@@ -531,6 +562,31 @@ export const clouds = [
 ];
 clouds.forEach(cloud => scene.add(cloud));
 
+// ===== 云朵转场系统 =====
+// 打完一关后，5朵云向玩家后方移动(Z+)，正前方云朵经过玩家时形成遮挡转场效果
+// 云朵经过消失距离后重置到远处，重新移入
+//
+// 各参数说明：
+//   TRANSITION_CLOUD_POSITIONS — [x,z] 坐标对，y=TRANSITION_CLOUD_Y，组合成 5 朵云的起始位置
+//     索引 0-3: 四个角（左右前后各15米）
+//     索引 4: 正前方15米（转场时会遮挡玩家）
+//   TRANSITION_CLOUD_Y — 云朵高度（米）
+//   TRANSITION_CLOUD_SCALE — 云朵整体缩放
+//   TRANSITION_SPEED — 云朵移动速度（米/秒，越大越快穿过玩家）
+//   TRANSITION_DISAPPEAR_Z — 云朵Z>此值后消失（米，建议与场景BOUND相当）
+//   TRANSITION_SPAWN_Z — 新云朵重生Z坐标（米，负值代表玩家前方远处）
+export const TRANSITION_CLOUD_POSITIONS = [
+    [-15, -15],  // 索引0: 左前角 (x=-15, z=-15)
+    [15, -15],   // 索引1: 右前角 (x=15, z=-15)
+    [-15, 15],   // 索引2: 左后角 (x=-15, z=15)
+    [15, 15],    // 索引3: 右后角 (x=15, z=15)
+    [0, -15],    // 索引4: 正前方15米 (x=0, z=-15) ← 转场时遮挡玩家
+];
+export const TRANSITION_CLOUD_Y = 5;        // 云朵高度（米）
+export const TRANSITION_CLOUD_SCALE = 2;    // 云朵整体缩放
+export const TRANSITION_SPEED = 50;         // 云朵移动速度（米/秒，越快转场越短）
+export const TRANSITION_DISAPPEAR_Z = 300;  // 云朵消失Z坐标（米，原50改300）
+export const TRANSITION_SPAWN_Z = -320;     // 新云朵重生Z坐标（米，原-55改-320）
 // ===================== Group 容器 =====================
 export const bulletGroup = new THREE.Group();
 scene.add(bulletGroup);
