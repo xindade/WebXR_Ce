@@ -190,6 +190,22 @@ export function spawnBalloons() {
     STATE.wavePhase = 1;
     STATE.spawnBatchTimer = 0;
 
+    // 按波次设置天空和云朵
+    if (STATE.waveNumber === 0) {
+        applySkyTarget('dusk');
+        clouds.forEach(c => c.visible = true);
+        window.__log('🌅 第一关：黄昏', 's');
+    } else if (STATE.waveNumber === 1) {
+        applySkyTarget('night');
+        clouds.forEach(c => c.visible = false);
+        window.__log('🌙 第二关：夜晚（云朵消散）', 's');
+    } else {
+        // 激光关卡失败后恢复射击时
+        applySkyTarget('day');
+        clouds.forEach(c => c.visible = true);
+        window.__log('☀️ 后续波次：白天', 's');
+    }
+
     window.__log('🎈 第' + STATE.waveNumber + '波开始，目标生成 ' + totalSpawns + ' 个气球', 's');
     console.log(`🎈 第${STATE.waveNumber}波开始，目标生成 ${totalSpawns} 个气球`);
 }
@@ -949,6 +965,14 @@ export function updateCooldowns(dt) {
         if (STATE.nextWaveTimer <= 0) {
             STATE.nextWaveTimer = 0;
             STATE.waveNumber++;
+            // 波次1清空后（waveNumber === 2）→ 进入激光关卡（跳过波次2射击）
+            if (STATE.waveNumber === 2) {
+                STATE.gameMode = 'laser';
+                window.__log('🎆 进入激光关卡！', 's');
+                balloons.forEach(b => disposeBalloon(b));
+                balloons.length = 0;
+                return;
+            }
             if (STATE.waveNumber >= 1 && !STATE.buddhaPalmReady) {
                 attachBuddhaPalmToLeft();
             }

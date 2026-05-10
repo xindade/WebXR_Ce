@@ -150,6 +150,7 @@
         import { renderer, scene, camera, choiceCardGroup, setShadow, updateSkyTransition, applySkyTarget, STATE } from './js/core.js';
         import { GameAPI as game } from './js/game.js';
         import { VrAPI as vr } from './js/vr.js';
+        import { LaserAPI as laser } from './js/laser-level.js';
 
         // 将音频/VR模块注入游戏模块（避免循环依赖）
         game.setAudio(vr);
@@ -251,9 +252,23 @@
             try {
                 updateSkyTransition(dt);
                 game.updateCooldowns(dt);
+                // 检测模式切换（在 updateCooldowns 设置 gameMode 之后）
+                if (STATE.gameMode === 'laser' && !laser._initialized) {
+                    laser._initialized = true;
+                    laser.startLaserLevel();
+                }
 
                 if (renderer.xr.isPresenting) {
-                    if (!STATE.gameOverState) {
+                    if (STATE.gameMode === 'laser') {
+                        // 激光关卡模式
+                        if (!STATE.gameOverState) {
+                            vr.updateInputs();
+                            vr.handleMovement(dt);
+                            laser.updateLaserLevel(dt);
+                            vr.handleExit();
+                        }
+                    } else if (!STATE.gameOverState) {
+                        // 射击关卡模式
                         vr.updateInputs();
                         vr.handleMovement(dt);
                         vr.handleShooting();
@@ -330,11 +345,22 @@
                     if (selectedLevel > 0) {
                         STATE.playerStats.gold = 1000;
                         STATE.playerStats.atk = 100;
-                        STATE.waveNumber = selectedLevel - 1;
-                        window.__log('关卡' + selectedLevel + ' 生效: gold=' + STATE.playerStats.gold + ' atk=' + STATE.playerStats.atk + ' wave=' + STATE.waveNumber, 's');
+                        if (selectedLevel === 3) {
+                            // 第三关：直接进入激光关卡
+                            STATE.gameMode = 'laser';
+                            window.__log('🎆 第三关：激光关卡启动', 's');
+                        } else {
+                            STATE.waveNumber = selectedLevel - 1;
+                            window.__log('关卡' + selectedLevel + ' 生效: gold=' + STATE.playerStats.gold + ' atk=' + STATE.playerStats.atk + ' wave=' + STATE.waveNumber, 's');
+                        }
                     }
-                    game.spawnBalloons();
-                    window.__log('游戏开始 / 气球生成', 's');
+                    if (STATE.gameMode === 'laser') {
+                        laser.startLaserLevel();
+                        laser._initialized = true;
+                    } else {
+                        game.spawnBalloons();
+                        window.__log('游戏开始 / 气球生成', 's');
+                    }
                 }
             }, 500);
         });
@@ -352,6 +378,9 @@
             STATE.gameOverState = false;
             STATE.shipHp = 100;
             STATE.shipHitFlash = 0;
+            STATE.gameMode = 'shooting';
+            laser.cleanupLaserLevel();
+            laser._initialized = false;
             STATE.leftHandGunEnabled = false;
             STATE.ak48Attached = false;
             STATE.ak48LeftAttached = false;

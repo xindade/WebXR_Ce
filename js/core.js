@@ -67,10 +67,10 @@ export const SHIP_REPEL_FORCE = 2.0;
 //   HIGHLIGHT_PULL — 高亮时向玩家方向拉近的距离（米）
 //   HIGHLIGHT_SCALE — 高亮时的缩放倍数
 //   HIGHLIGHT_LERP — 高亮缩放插值速度（越大越快）
-export const CHOICE_CARD_DISTANCE = 1.75;     // 卡片距出生点距离（m）
+export const CHOICE_CARD_DISTANCE = 1.65;     // 卡片距出生点距离（m）
 export const CHOICE_CARD_WIDTH = 0.5;          // 属性卡宽度
 export const CHOICE_CARD_HEIGHT = 0.5;         // 属性卡高度
-export const CHOICE_REFRESH_HEIGHT = 0.16;     // 刷新卡高度
+export const CHOICE_REFRESH_HEIGHT = 0.26;     // 刷新卡高度
 export const CHOICE_CARD_SPACING = 0.6;        // 属性卡左右间距
 export const CHOICE_REFRESH_OFFSET_Y = -0.35;  // 刷新卡Y偏移（下方）
 export const CHOICE_CARD_Y_OFFSET = -0.1;      // 卡片Y整体微调
@@ -224,6 +224,9 @@ export const STATE = {
     transitionCloudPhase: 0, // 0=静止, 1=移出, 2=移入
     transitionCloudTimer: 0,
     nextWaveTimer: 0,       // 波次过渡倒计时(s)，取代 setTimeout
+
+    // 游戏模式
+    gameMode: 'shooting',   // 'shooting' | 'laser'
 };
 
 // ===================== Three.js 核心 =====================
@@ -534,6 +537,13 @@ export function updateSkyTransition(dt) {
 }
 
 // ===================== 云朵装饰 =====================
+// createCloud(x, y, z, scale): 创建一朵由3个球体组成的低多边形云
+//   x  — 世界坐标 X（正=右，负=左）
+//   y  — 世界坐标 Y（越高=越飘在空中）
+//   z  — 世界坐标 Z（正=后，负=前，玩家在原点）
+//   scale — 整体缩放（1.0=基础大小，2.0=两倍大）
+//   每朵云由3个球体组成：中心(半径0.8) + 右(0.6) + 左(0.55)
+//   材质: MeshBasicMaterial 白色（不受光照影响，省GPU）
 export function createCloud(x, y, z, scale = 1) {
     const cloudGroup = new THREE.Group();
     const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
@@ -552,6 +562,21 @@ export function createCloud(x, y, z, scale = 1) {
     return cloudGroup;
 }
 
+// — 装饰云朵（12朵，世界空间固定位置，不跟随玩家） —
+// 格式: createCloud(x, y, z, scale)
+//   云0:  (-8,  5, -10, 1.5)  左前方远处
+//   云1:  (10,  6, -15, 2.0)  右前方远处（最大）
+//   云2:  (-5,  7,   8, 1.2)  左后方
+//   云3:  (15,  5,   5, 1.8)  右后侧
+//   云4:  ( 3,  8, -20, 2.2)  正前方很远（最高）
+//   云5:  (-12, 4,   3, 1.0)  左后侧（最小）
+//   云6:  (20,  6,  -8, 1.6)  右前侧
+//   云7:  (-18, 5, -12, 1.4)  左前远处
+//   云8:  ( 0,  9,  15, 2.5)  正后方远处（最大）
+//   云9:  (-8,  3, -25, 1.3)  正前方极远
+//   云10: (25,  7,  10, 1.7)  右后远处
+//   云11: (-22, 4, -18, 1.1)  左前极远
+//   visible: 默认 true，波次1(夜晚)时设为 false，波次0/激光时设为 true
 export const clouds = [
     createCloud(-8, 5, -10, 1.5), createCloud(10, 6, -15, 2),
     createCloud(-5, 7, 8, 1.2), createCloud(15, 5, 5, 1.8),
@@ -584,7 +609,7 @@ export const TRANSITION_CLOUD_POSITIONS = [
 ];
 export const TRANSITION_CLOUD_Y = 5;        // 云朵高度（米）
 export const TRANSITION_CLOUD_SCALE = 2;    // 云朵整体缩放
-export const TRANSITION_SPEED = 50;         // 云朵移动速度（米/秒，越快转场越短）
+export const TRANSITION_SPEED = 20;         // 云朵移动速度（米/秒，越快转场越短）
 export const TRANSITION_DISAPPEAR_Z = 300;  // 云朵消失Z坐标（米，原50改300）
 export const TRANSITION_SPAWN_Z = -320;     // 新云朵重生Z坐标（米，原-55改-320）
 // ===================== Group 容器 =====================
