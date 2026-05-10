@@ -42,6 +42,7 @@
 | `js/core.js` | ~620 | 常量、共享状态 STATE、Three.js 核心（渲染器/场景/相机）、灯光、天空、云朵、容器、云转场配置 |
 | `js/game.js` | ~1200 | 子弹、气球、波次、碰撞、抽卡、如来神掌、特效、云朵转场 |
 | `js/vr.js` | ~540 | 音效、模型加载、手柄、枪支/后坐力、输入处理、UI 面板、左手射线球/射线 |
+| `js/laser-level.js` | ~530 | **激光关卡（第三关）**: 8个双金字塔气球、激光光束、驱赶/散落动画、碰撞检测、死亡冻结、魔术师模型加载 |
 
 ### 3.2 模块间依赖与注入
 
@@ -52,7 +53,9 @@ game.js  ← 依赖 core.js 常量/STATE，运行时注入 vr.js 的音频/VR �
   ↑  ↑
 vr.js    ← 依赖 core.js 常量/STATE，直接导入 game.js 的 shootBullet()
   ↑
-index.html ← 组装者：注入跨模块依赖，驱动动画循环
+laser-level.js ← 依赖 core.js（场景/相机/云朵/日月），使用动态 import 调用 game.js 方法
+  ↑
+index.html ← 组装者：注入跨模块依赖，驱动动画循环，按 STATE.gameMode 分发
 ```
 
 ```javascript
@@ -666,34 +669,133 @@ IDLE → (左手握柄上升沿 + 冷却结束) → 直接释放（无瞄准状�
 
 ---
 
-## 19. 游戏状态机
+## 19. 激光关卡（第三关）
+
+`js/laser-level.js` | 约 530 行 | 独立游戏模式（非射击，躲避型）
+
+### 19.1 触发条件
+
+- **正常流程**: 波次1清空后，`waveNumber===2` → `STATE.gameMode = 'laser'`
+- **选关**: 直接选第三关 → `startLaserLevel()` 跳过射击
+- **天空**: `applySkyTarget('day')`（白天）
+- **原场景**: `hideShootingScene()` 隐藏船/云/日月/容器/AK48，恢复时 `showShootingScene()`
+
+### 19.2 状态机
+
+```
+INACTIVE → INTRO(8s) → ENTER(1s) → DRIVE(2s) → SETTLE_ROW3(1s) → SETTLE_ROW12(1s) → FIGHTING → CLEARED/FAILED
+```
+
+| 阶段 | 时长 | 内容 |
+|:----|:----:|:-----|
+| `INTRO` | 8.0s | 魔术师模型(`Model/魔术师.glb`+`魔术棒.glb`) 漂浮旋转表演 |
+| `ENTER` | 1.0s | 8个激光气球淡入登场 |
+| `DRIVE` | 2.0s | 气球从 z=-4.5 驱赶到 z=2.5，玩家需避开 |
+| `SETTLE_ROW3` | 1.0s | groups[4-7] 移向 z=-1.5 + 激光旋转指向地面 |
+| `SETTLE_ROW12` | 1.0s | groups[2-3] 移向 z=0.5 + 激光指向地面；groups[0-1] 移向 z=2.5 + 右球上升0.5m |
+| `FIGHTING` | — | 玩家躲避激光走到 z<-3.5 过关 |
+| `CLEARED` | — | 奖励 500金币 + 抽卡，恢复射击模式 |
+| `FAILED` | — | 3次失败后无奖励，恢复射击模式 |
+
+### 19.3 气球排布
+
+| 索引 | 位置 | Y原始高 | 散落后 Y | 动画 |
+|:---:|:----:|:-------:|:---------:|:-----|
+| groups[0] | 左列·底层 | 2.0m | **+1m→3.0m** | 垂直振荡 (1.5m/8s) |
+| groups[1] | 右列·底层 | 2.0m | **+1m+0.5→3.5m** | 垂直振荡 |
+| groups[2] | 左列·二层 | 4.5m | **+1m→5.5m** | X向聚合分开 (4s周期) + 激光指地 |
+| groups[3] | 右列·二层 | 4.5m | **+1m→5.5m** | X向聚合分开 + 激光指地 |
+| groups[4] | 左列·三层 | 7.0m | **-3m→4.0m** | 垂直振荡 |
+| groups[5] | 右列·三层 | 7.0m | **-3m→4.0m** | 垂直振荡 |
+| groups[6] | 左列·顶层 | 9.5m | **-3m→6.5m** | X向聚合分开 + 激光指地 |
+| groups[7] | 右列·顶层 | 9.5m | **-3m→6.5m** | X向聚合分开 + 激光指地 |
+
+### 19.4 所有可调参数
+
+全部在 `LASER_CONFIG` 中：
+
+| 参数 | 默认值 | 说明 |
+|:-----|:------:|:-----|
+| `introDuration` | 8.0s | 魔术师表演时长 |
+| `driveDuration` | 2.0s | 驱赶动画时长 |
+| `settleDuration` | 1.0s | 散落动画时长 |
+| `oscAmplitude` | 1.5m | 垂直振荡幅度 |
+| `oscPeriod` | 8s | 振荡周期 |
+| `aggPeriod` | 4s | 聚合周期 |
+| `aggRange` | 2.5m | 聚合范围 |
+| `collisionRadius` | 0.15m | 激光碰撞半径 |
+| `freezeDuration` | 3.0s | 死亡冻结时长 |
+| `maxFailures` | 3 | 最大失败次数 |
+| `row1HeightOffset` | +1.0m | 第一排高度偏移 |
+| `row2HeightOffset` | +1.0m | 第二排高度偏移 |
+| `row3HeightOffset` | -3.0m | 第三排高度偏移 |
+| `groupScale` | 0.25 | 气球整体缩放 |
+| `laserLengthPreScale` | 16 → 4m | 激光长度（缩放后） |
+
+### 19.5 死亡冻结机制
+
+1. 碰激光 → `handleLaserHit()` → 黑屏方块 (`BoxGeometry 0.6×0.5×0.5`, `BackSide`, 包裹头显) → 瞬移安全区
+2. `freezeTimer=3s` → 冻结期间锁定 `dolly.position`（玩家不能动）
+3. 黑屏渐退：前 10% 全黑 → 后 90% 透明度渐降
+4. 冻结结束 → 1 秒无敌保护（`invulnTimer`）→ 回到 FIGHTING
+5. 3 次失败 → 关卡结束，无奖励，恢复射击模式
+
+---
+
+## 20. 游戏状态机
+
+### 19.1 整体流程
 
 ```
 [桌面预览] → 点击"正常开始游戏"（或选关后进入）
       ↓
 [VR 会话请求] → isSessionSupported() → requestSession('immersive-vr')
       ↓ sessionstart 事件
-[attachAK48() / initAudio()] → 500ms → [选关则设置属性 + 解锁神掌] → spawnBalloons()
+[attachAK48() / initAudio()] → 500ms → 选关逻辑 → 进入射击或激光模式
       ↓
-[波次 0: 分阶段生成]
-   ├─ 清空 → [抽卡(15s超时)] → [nextWaveTimer=1s] → waveNumber++ → 下一波
-   └─ 撞船扣血 → shipHp≤0 → [gameOver()] → 1.5s → [restartLevel(保留wave)] → 赠抽卡
+      ├── 射击模式 (STATE.gameMode === 'shooting'):
+      │   [波次0: 黄昏·有云] → 清空 → 抽卡 → waveNumber=1 → 
+      │   [波次1: 夜晚·无云] → 清空 → 抽卡 → waveNumber=2 →
+      │            ↓ waveNumber===2
+      │   [STATE.gameMode = 'laser', 气球清理]
+      │            ↓ index.html 检测到gameMode切换
+      └── 激光模式 (STATE.gameMode === 'laser'):
+              [hideShootingScene() 隐藏原场景]
+              [applySkyTarget('day') 白天]
+              [舞台网格 + 魔术师模型(8秒表演)]
+              [8个激光气球登场] → [淡入] → [驱赶动画(2s)]
+              → [第三排散落(1s)] → [第二排+第一排散落(1s)]
+              → [FIGHTING: 玩家躲避激光走向终点]
+                  ├── 碰到激光 → 黑屏方块包裹头显 → 冻结3秒
+                  │     ├── 3次失败 → 关卡结束无奖励 → 恢复射击模式
+                  │     └── <3次失败 → 1秒无敌 → 继续闯关
+                  └── 到达终点(z<-3.5) → 奖励500金币+抽卡 → 恢复射击模式
 ```
 
-**关键状态变量**（`STATE` 对象）:
+### 19.2 波次→天空→云朵映射
+
+| 波次 | 关卡 | 天空 | 云朵 |
+|:----:|:----:|:----:|:----:|
+| wave=0 | 第一关（射击） | 🌅 黄昏 | 可见 |
+| wave=1 | 第二关（射击） | 🌙 夜晚 | 消失 |
+| wave=2 | **第三关（激光）** | ☀️ 白天 | 可见 |
+| wave≥3 | 后续射击 | ☀️ 白天 | 可见 |
+
+### 19.3 关键状态变量
+
+**`STATE` 对象**（`js/core.js`）:
+- `gameMode`: `'shooting'` | `'laser'` — 当前游戏模式
 - `gameStarted`: 是否开始战斗
 - `gameOverState`: 是否死亡处理中
 - `waveNumber`: 0-based 波次
 - `shipHp`: 船血量
 - `choiceCardsActive`: 是否抽卡中
 - `buddhaPalmReady`: 神掌是否解锁
-- `buddhaPalmState`: `IDLE`（握柄即释放，无瞄准状态)
-- `buddhaPalmUnlocked`: 选关时标记，模型加载后自动解锁
 - `playerStats`: `{hp, score, atk, gold}`
 - `fireRate`: 射速倍率（默认 1.0）
 - `multiShotChance`: 多重射击概率 %
 
-**sessionend 重置**: 所有 STATE 字段清零，包括 `waveNumber=0`, `buddhaPalmReady=false`, 清除选择卡和神掌。
+**sessionend 重置**: 所有 STATE 字段清零，`gameMode='shooting'`，清除选择卡和神掌，清理激光关卡。
 
 ---
 
