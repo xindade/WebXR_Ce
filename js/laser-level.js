@@ -82,8 +82,10 @@ const S = {
     magicianWand: null,
     animData: {},
     freezeTimer: 0,         // 死亡冻结倒计时（秒）
+    blackoutTimer: 0,       // 漆黑倒计时（秒）：命中的前2秒全黑
     blackOverlay: null,     // 黑屏Mesh
     invulnTimer: 0,         // 重生无敌保护（秒）
+    restoreAfterBlackout: false, // 标记：漆黑结束后需要恢复场景
 };
 
 // ===================== 隐藏/显示场景 =====================
@@ -299,15 +301,28 @@ export function updateLaserLevel(dt) {
     S.elapsed += dt;
     const cfg = LASER_CONFIG;
 
-    // ── 冻结中：锁定位置 + 黑屏渐退 ──
+    // ── 冻结中：锁定位置 + 黑屏渐退 + 漆黑模式 ──
     if (S.freezeTimer > 0) {
         S.freezeTimer -= dt;
         dolly.position.set(0, 0, cfg.resetZ);
-        if (S.blackOverlay) {
-            const fade = Math.max(0, S.freezeTimer / cfg.freezeDuration);
-            S.blackOverlay.material.opacity = Math.min(1, fade / 0.3);
+
+        // 漆黑阶段：前2秒天空全黑、激光气球/云/月/星隐藏
+        if (S.blackoutTimer > 0) {
+            S.blackoutTimer -= dt;
+            if (S.blackOverlay) S.blackOverlay.material.opacity = 1;
+            // 漆黑结束，恢复光线
+            if (S.blackoutTimer <= 0) restoreAfterBlackout();
+        } else {
+            // 漆黑结束后：正常淡出黑屏
+            if (S.blackOverlay) {
+                const fade = Math.max(0, S.freezeTimer / cfg.freezeDuration);
+                S.blackOverlay.material.opacity = Math.min(1, fade / 0.3);
+            }
         }
+
         if (S.freezeTimer <= 0) {
+            // 确保漆黑标记清理
+            if (S.restoreAfterBlackout) restoreAfterBlackout();
             if (S.blackOverlay) S.blackOverlay.material.opacity = 0;
             if (S.failures >= cfg.maxFailures) {
                 S.phase = 'CLEARED'; onLaserFailed(); return;
@@ -518,9 +533,41 @@ function checkLaserCollision() {
 function handleLaserHit() {
     S.failures++;
     S.freezeTimer = LASER_CONFIG.freezeDuration;
+    S.blackoutTimer = 2.0;   // 漆黑2秒
     if (S.blackOverlay) S.blackOverlay.material.opacity = 1;
     teleportPlayerToSafe();
+
+    // 隐藏激光气球
+    S.groups.forEach(g => { if (g) g.visible = false; });
+    // 场景全黑
+    scene.background = new THREE.Color(0x000000);
+    // 隐藏云朵、月亮、星星
+    clouds.forEach(c => { if (c) c.visible = false; });
+    if (moonSprite) moonSprite.visible = false;
+    starLayers.forEach(s => { if (s) s.visible = false; });
+    // 隐藏太阳（白天也会被隐藏）
+    if (sunSprite) sunSprite.visible = false;
+    // 关闭环境光模拟漆黑
+    if (scene.fog) scene.fog = null;
+
+    S.restoreAfterBlackout = true;
+    window.__log('🌑 漆黑降临！2秒后恢复...', 'e');
     window.__log('💥 撞到激光！剩余:' + (LASER_CONFIG.maxFailures - S.failures) + '，冻结' + LASER_CONFIG.freezeDuration + '秒', 'e');
+}
+
+function restoreAfterBlackout() {
+    S.groups.forEach(g => { if (g) g.visible = true; });
+    // 恢复白天
+    import('./core.js').then(m => { m.applySkyTarget('day'); });
+    // 恢复云朵、月亮、星星
+    clouds.forEach(c => { if (c) c.visible = true; });
+    if (moonSprite) moonSprite.visible = true;
+    starLayers.forEach(s => { if (s) s.visible = true; });
+    if (sunSprite) sunSprite.visible = true;
+    // 恢复雾（用默认白天值）
+    scene.fog = new THREE.Fog(0x87CEEB, 10, 50);
+    S.restoreAfterBlackout = false;
+    window.__log('☀️ 光明恢复！', 's');
 }
 
 function onLaserCleared() {

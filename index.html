@@ -17,6 +17,20 @@
         }
         canvas { display: block; }
 
+        /* 顶部分页导航 */
+        #nav-bar {
+            position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 30;
+            display: flex; gap: 4px; background: rgba(0,0,0,0.55);
+            padding: 4px; border-radius: 12px; backdrop-filter: blur(4px);
+        }
+        #nav-bar a {
+            display: block; padding: 6px 18px; border-radius: 8px;
+            color: rgba(255,255,255,0.5); text-decoration: none;
+            font-size: 13px; font-weight: 500; transition: all 0.15s;
+        }
+        #nav-bar a.active { background: rgba(255,255,255,0.15); color: #fff; }
+        #nav-bar a:hover { color: #fff; background: rgba(255,255,255,0.08); }
+
         #vr-entry { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); z-index: 20; display: flex; gap: 28px; align-items: flex-end; }
         #btn-container { display: flex; flex-direction: column; gap: 12px; align-items: center; }
         #level-container { display: flex; flex-direction: column; gap: 4px; align-items: center; }
@@ -111,6 +125,11 @@
     </style>
 </head>
 <body>
+    <!-- 顶部分页导航 -->
+    <div id="nav-bar">
+        <a href="index.html" class="active">🎯 游戏</a>
+        <a href="Model_Copy/anim-recorder.html">🎬 录制工具</a>
+    </div>
     <!-- JS 执行状态指示器（最优先显示） -->
     <div id="js-status" style="position:fixed;top:4px;right:4px;z-index:9999;background:#000;color:#ff0;font:14px monospace;padding:4px 10px;border-radius:4px;">⏳ JS...</div>
 

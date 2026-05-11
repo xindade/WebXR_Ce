@@ -1,6 +1,6 @@
 # VR 热气球射击游戏 — 技术文档
 
-> 最后更新: 2026-05-09 | 入口: `index.html` + `js/` 模块 | Three.js r168 ES Module + WebXR
+> 最后更新: 2026-05-11 | 入口: `index.html` + `js/` 模块 | Three.js r168 ES Module + WebXR
 
 ---
 
@@ -42,7 +42,7 @@
 | `js/core.js` | ~620 | 常量、共享状态 STATE、Three.js 核心（渲染器/场景/相机）、灯光、天空、云朵、容器、云转场配置 |
 | `js/game.js` | ~1200 | 子弹、气球、波次、碰撞、抽卡、如来神掌、特效、云朵转场 |
 | `js/vr.js` | ~540 | 音效、模型加载、手柄、枪支/后坐力、输入处理、UI 面板、左手射线球/射线 |
-| `js/laser-level.js` | ~530 | **激光关卡（第三关）**: 8个双金字塔气球、激光光束、驱赶/散落动画、碰撞检测、死亡冻结、魔术师模型加载 |
+| `js/laser-level.js` | ~570 | **激光关卡（第三关）**: 8个双金字塔气球、激光光束、驱赶/散落动画、碰撞检测、漆黑降临、死亡冻结、魔术师模型加载 |
 
 ### 3.2 模块间依赖与注入
 
@@ -732,13 +732,23 @@ INACTIVE → INTRO(8s) → ENTER(1s) → DRIVE(2s) → SETTLE_ROW3(1s) → SETTL
 | `groupScale` | 0.25 | 气球整体缩放 |
 | `laserLengthPreScale` | 16 → 4m | 激光长度（缩放后） |
 
-### 19.5 死亡冻结机制
+### 19.5 死亡冻结机制（含漆黑降临）
 
-1. 碰激光 → `handleLaserHit()` → 黑屏方块 (`BoxGeometry 0.6×0.5×0.5`, `BackSide`, 包裹头显) → 瞬移安全区
-2. `freezeTimer=3s` → 冻结期间锁定 `dolly.position`（玩家不能动）
-3. 黑屏渐退：前 10% 全黑 → 后 90% 透明度渐降
-4. 冻结结束 → 1 秒无敌保护（`invulnTimer`）→ 回到 FIGHTING
-5. 3 次失败 → 关卡结束，无奖励，恢复射击模式
+1. 碰激光 → `handleLaserHit()` 触发：
+   - 黑屏方块 (`BoxGeometry 0.6×0.5×0.5`, `BackSide`, 包裹头显)
+   - 瞬移安全区 (`dolly.position.z = resetZ`)
+   - **漆黑降临**: `blackoutTimer=2s`
+     - 激光气球全部隐藏 (`visible=false`)
+     - `scene.background = 0x000000`
+     - 云朵、月亮、星星、太阳全部隐藏
+     - 场景雾移除
+   - `freezeTimer=3s`（冻结3秒，其中前2秒漆黑）
+2. 冻结阶段：
+   - `blackoutTimer>0`: 天空全黑、所有装饰隐藏、黑屏不渐退
+   - `blackoutTimer<=0`: `restoreAfterBlackout()` → 恢复白天+云/月/星+激光气球
+   - 剩余1秒：黑屏渐退（前10%全黑 → 后90%透明度渐降）
+3. 冻结结束 → 1 秒无敌保护（`invulnTimer`）→ 回到 FIGHTING
+4. 3 次失败 → 关卡结束，无奖励，恢复射击模式
 
 ---
 
