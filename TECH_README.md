@@ -1,6 +1,6 @@
 # VR 热气球射击游戏 — 技术文档
 
-> 最后更新: 2026-05-11 | 入口: `index.html` + `js/` 模块 | Three.js r168 ES Module + WebXR
+> 最后更新: 2026-05-12 | 入口: `index.html` + `js/` 模块 | Three.js r168 ES Module + WebXR
 
 ---
 
@@ -42,7 +42,7 @@
 | `js/core.js` | ~620 | 常量、共享状态 STATE、Three.js 核心（渲染器/场景/相机）、灯光、天空、云朵、容器、云转场配置 |
 | `js/game.js` | ~1200 | 子弹、气球、波次、碰撞、抽卡、如来神掌、特效、云朵转场 |
 | `js/vr.js` | ~540 | 音效、模型加载、手柄、枪支/后坐力、输入处理、UI 面板、左手射线球/射线 |
-| `js/laser-level.js` | ~570 | **激光关卡（第三关）**: 8个双金字塔气球、激光光束、驱赶/散落动画、碰撞检测、漆黑降临、死亡冻结、魔术师模型加载 |
+| `js/laser-level.js` | ~745 | **激光关卡（第三关）**: 8个双金字塔气球、坐标网格、多阶段动画序列、碰撞检测(支持任意方向)、死亡重置、通关庆祝 |
 
 ### 3.2 模块间依赖与注入
 
@@ -671,7 +671,7 @@ IDLE → (左手握柄上升沿 + 冷却结束) → 直接释放（无瞄准状�
 
 ## 19. 激光关卡（第三关）
 
-`js/laser-level.js` | 约 530 行 | 独立游戏模式（非射击，躲避型）
+`js/laser-level.js` | 约 745 行 | 独立游戏模式（非射击，躲避型）
 
 ### 19.1 触发条件
 
@@ -680,77 +680,69 @@ IDLE → (左手握柄上升沿 + 冷却结束) → 直接释放（无瞄准状�
 - **天空**: `applySkyTarget('day')`（白天）
 - **原场景**: `hideShootingScene()` 隐藏船/云/日月/容器/AK48，恢复时 `showShootingScene()`
 
-### 19.2 状态机
+### 19.2 坐标网格
+
+- 6m×10m 1m 网格，居中于原点 (0,0,0)
+- 坐标轴: X=红线, Z=蓝线, Y=绿线（正方向），灰色虚线（负方向）
+- 每个气球上方有 Canvas Sprite 数字标签 ①-⑧
+
+### 19.3 气球初始位置
+
+全部 Z=-4，两列 X=±2.5，Y 从 0.5 递增到 6.7
+
+### 19.4 动画序列状态机
 
 ```
-INACTIVE → INTRO(8s) → ENTER(1s) → DRIVE(2s) → SETTLE_ROW3(1s) → SETTLE_ROW12(1s) → FIGHTING → CLEARED/FAILED
+INTRO(8s) → DRIVE(6s) → ANIM_1A(1s) → ANIM_1B(0.5s) → ANIM_2 → ANIM_3
+                                                              ↓ 碰激光
+                                                        handleLaserHit()
+                                                          ├─ 黑屏1s
+                                                          └─ freezeTimer
+                                                               ↓ 结束
+                                                        failures≥3 → CLEANUP
+                                                        failures<3 → resetAndRestart()
+                                                                      ↓
+                                                                  回到 DRIVE
 ```
 
 | 阶段 | 时长 | 内容 |
 |:----|:----:|:-----|
-| `INTRO` | 8.0s | 魔术师模型(`Model/魔术师.glb`+`魔术棒.glb`) 漂浮旋转表演 |
-| `ENTER` | 1.0s | 8个激光气球淡入登场 |
-| `DRIVE` | 2.0s | 气球从 z=-4.5 驱赶到 z=2.5，玩家需避开 |
-| `SETTLE_ROW3` | 1.0s | groups[4-7] 移向 z=-1.5 + 激光旋转指向地面 |
-| `SETTLE_ROW12` | 1.0s | groups[2-3] 移向 z=0.5 + 激光指向地面；groups[0-1] 移向 z=2.5 + 右球上升0.5m |
-| `FIGHTING` | — | 玩家躲避激光走到 z<-3.5 过关 |
-| `CLEARED` | — | 奖励 500金币 + 抽卡，恢复射击模式 |
-| `FAILED` | — | 3次失败后无奖励，恢复射击模式 |
+| `INTRO` | 8.0s | 魔术师漂浮旋转表演 |
+| `DRIVE` | 6.0s | 所有气球 Z:-4→2 |
+| `ANIM_1A` | 1.0s | ③-⑧号 Z:2→0，①②号不动 |
+| `ANIM_1B` | 0.5s | ③④号 rotation.z→0（激光垂直指向地面）|
+| `ANIM_2` | ~3s | ①② Y振荡(0.2~4), ③④ Y+2→X振荡, ⑤-⑧ Z:0→-2 |
+| `ANIM_3` | 持续 | ⑤⑥ Y振荡(周期6s), ⑦⑧ 旋转→Y4.5→X振荡 |
+| `WINNING` | 1.5s | 魔术师飞到面前斜上方庆祝旋转 |
+| `CLEARED` | — | 全部传说品质卡片×3 + 500金币 |
 
-### 19.3 气球排布
+### 19.5 死亡机制
 
-| 索引 | 位置 | Y原始高 | 散落后 Y | 动画 |
-|:---:|:----:|:-------:|:---------:|:-----|
-| groups[0] | 左列·底层 | 2.0m | **+1m→3.0m** | 垂直振荡 (1.5m/8s) |
-| groups[1] | 右列·底层 | 2.0m | **+1m+0.5→3.5m** | 垂直振荡 |
-| groups[2] | 左列·二层 | 4.5m | **+1m→5.5m** | X向聚合分开 (4s周期) + 激光指地 |
-| groups[3] | 右列·二层 | 4.5m | **+1m→5.5m** | X向聚合分开 + 激光指地 |
-| groups[4] | 左列·三层 | 7.0m | **-3m→4.0m** | 垂直振荡 |
-| groups[5] | 右列·三层 | 7.0m | **-3m→4.0m** | 垂直振荡 |
-| groups[6] | 左列·顶层 | 9.5m | **-3m→6.5m** | X向聚合分开 + 激光指地 |
-| groups[7] | 右列·顶层 | 9.5m | **-3m→6.5m** | X向聚合分开 + 激光指地 |
+1. 碰激光 → `handleLaserHit()`: `freezeTimer=1s`, 黑屏(5×5×5方块), 瞬移安全区
+2. 冻结结束 → `resetAndRestart()`: 清理旧气球→重新生成→回到 `DRIVE`
+3. `invulnTimer=1s` 无敌保护
+4. 失败3次 → 清理场景，恢复射击模式
 
-### 19.4 所有可调参数
+### 19.6 通关条件
 
-全部在 `LASER_CONFIG` 中：
+- 玩家走进 Z:-4 ~ -2.2 区间
+- 触发 `WINNING` 阶段：魔术师飞到 (1.5, 5.5, -3) 庆祝
+- 1.5s 后弹出 3 张全部传说品质卡片 + 500金币
+
+### 19.7 碰撞检测
+
+使用 `applyMatrix4(g.matrixWorld)` 将激光的局部端点变换到世界坐标，支持任意旋转方向。每 3 帧检测一次，高度偏移点 0.5/1.3/1.6m。
+
+### 19.8 可调参数
 
 | 参数 | 默认值 | 说明 |
 |:-----|:------:|:-----|
-| `introDuration` | 8.0s | 魔术师表演时长 |
-| `driveDuration` | 2.0s | 驱赶动画时长 |
-| `settleDuration` | 1.0s | 散落动画时长 |
-| `oscAmplitude` | 1.5m | 垂直振荡幅度 |
-| `oscPeriod` | 8s | 振荡周期 |
-| `aggPeriod` | 4s | 聚合周期 |
-| `aggRange` | 2.5m | 聚合范围 |
-| `collisionRadius` | 0.15m | 激光碰撞半径 |
-| `freezeDuration` | 3.0s | 死亡冻结时长 |
+| `magicianDur` | 8.0s | 开场时长 |
+| `freezeDuration` | 1.0s | 黑屏冻结时长 |
 | `maxFailures` | 3 | 最大失败次数 |
-| `row1HeightOffset` | +1.0m | 第一排高度偏移 |
-| `row2HeightOffset` | +1.0m | 第二排高度偏移 |
-| `row3HeightOffset` | -3.0m | 第三排高度偏移 |
+| `collisionRadius` | 0.15m | 激光碰撞半径 |
 | `groupScale` | 0.25 | 气球整体缩放 |
-| `laserLengthPreScale` | 16 → 4m | 激光长度（缩放后） |
-
-### 19.5 死亡冻结机制（含漆黑降临）
-
-1. 碰激光 → `handleLaserHit()` 触发：
-   - 黑屏方块 (`BoxGeometry 0.6×0.5×0.5`, `BackSide`, 包裹头显)
-   - 瞬移安全区 (`dolly.position.z = resetZ`)
-   - **漆黑降临**: `blackoutTimer=2s`
-     - 激光气球全部隐藏 (`visible=false`)
-     - `scene.background = 0x000000`
-     - 云朵、月亮、星星、太阳全部隐藏
-     - 场景雾移除
-   - `freezeTimer=3s`（冻结3秒，其中前2秒漆黑）
-2. 冻结阶段：
-   - `blackoutTimer>0`: 天空全黑、所有装饰隐藏、黑屏不渐退
-   - `blackoutTimer<=0`: `restoreAfterBlackout()` → 恢复白天+云/月/星+激光气球
-   - 剩余1秒：黑屏渐退（前10%全黑 → 后90%透明度渐降）
-3. 冻结结束 → 1 秒无敌保护（`invulnTimer`）→ 回到 FIGHTING
-4. 3 次失败 → 关卡结束，无奖励，恢复射击模式
-
----
+| `laserLengthPreScale` | 16 → 4m | 激光长度（缩放后）|
 
 ## 20. 游戏状态机
 
@@ -962,4 +954,4 @@ git push                       # 推送到 origin/master
 
 ---
 
-*文档生成时间: 2026-05-09 | 模块化架构 | Three.js r168 | WebXR immersive-vr*
+*文档生成时间: 2026-05-12 | 模块化架构 | Three.js r168 | WebXR immersive-vr*

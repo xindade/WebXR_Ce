@@ -208,6 +208,7 @@ export const STATE = {
     buddhaPrevGrip: false,
 
     skyTarget: 'day',
+    skyLocked: false,       // 锁定天空变换（漆黑期间使用）
 
     waveSpawnRemaining: 0,
     waveSpawned: 0,
@@ -460,6 +461,7 @@ export function applySkyTarget(name) {
 export let skyBrightness = 1.0;
 
 export function updateSkyTransition(dt) {
+    if (STATE.skyLocked) return;  // 漆黑等场景锁定时跳过
     const p = skyPresets[STATE.skyTarget];
     const ease = 1 - Math.exp(-0.12 * dt);
 

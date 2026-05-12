@@ -639,18 +639,18 @@ export function updateRefreshCardTexture() {
     }
 }
 
-function generateRandomChoices() {
+function generateRandomChoices(forceLegendary) {
     // 随机选3个不同的属性
     const shuffled = [...ATTR_TYPES].sort(() => Math.random() - 0.5);
     const choices = [];
     for (let i = 0; i < 3; i++) {
-        const rarity = RARITIES[Math.floor(Math.random() * RARITIES.length)];
+        const rarity = forceLegendary ? RARITIES[3] : RARITIES[Math.floor(Math.random() * RARITIES.length)];
         choices.push({ attr: shuffled[i], rarity });
     }
     return choices;
 }
 
-export function spawnChoiceCards() {
+export function spawnChoiceCards(forceLegendary) {
     if (STATE.choiceCardsActive) return;
     STATE.choiceCardsActive = true;
     // choiceRefreshCount 和 choiceRefreshCooldown 不在此重置，由外部调用方或 clearChoiceCards 控制
@@ -683,7 +683,7 @@ export function spawnChoiceCards() {
     const faceTarget = camera.position.clone();
 
     // 3张属性卡
-    const choices = generateRandomChoices();
+    const choices = generateRandomChoices(forceLegendary);
     for (let i = 0; i < 3; i++) {
         const card = createChoiceCard(choices[i].attr, choices[i].rarity, i);
         const offsetX = (i - 1) * CHOICE_CARD_SPACING;
