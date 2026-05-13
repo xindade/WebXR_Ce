@@ -371,22 +371,15 @@ export function updateLaserLevel(dt) {
     S.elapsed += dt;
     const cfg = LASER_CONFIG;
 
-    // ── 冻结中：黑屏 + 锁定位置 ──
+    // ── 冻结闪烁（碰激光时短暂黑屏 0.3s）──
     if (S.freezeTimer > 0) {
         S.freezeTimer -= dt;
         dolly.position.set(0, 0, cfg.resetZ);
         if (S.blackOverlay) S.blackOverlay.material.opacity = 1;
         if (S.freezeTimer <= 0) {
             if (S.blackOverlay) S.blackOverlay.material.opacity = 0;
-            if (S.failures >= cfg.maxFailures) {
-                // 3 次失败 → 清理场景，进入下一关
-                S.phase = 'CLEARED';
-                onLaserFailed();
-                return;
-            } else {
-                // 重置气球 + 重新开始动画序列
-                resetAndRestartAnimation();
-            }
+            // 进入引导阶段
+            enterCenterPhase();
         }
         return;
     }
@@ -397,17 +390,15 @@ export function updateLaserLevel(dt) {
     // ── 通关检测 ──
     if (S.freezeTimer <= 0 && S.invulnTimer <= 0 &&
         (S.phase === 'ANIM_2' || S.phase === 'ANIM_3' || S.phase === 'SHOW_GRID')) {
-        // 玩家走进 Z:-4 ~ -2.2 区间 = 通关
         if (dolly.position.z >= -4.0 && dolly.position.z <= -2.2 && dolly.position.x >= -2 && dolly.position.x <= 2) {
-            S.phase = 'WINNING';
-            S.timer = 0;
-            window.__log('🏆 通关！魔术师庆祝中...', 's');
+            enterCenterPhase();
         }
     }
 
-    // ── 碰撞检测（所有动画阶段皆可触发） ──
+    // ── 碰撞检测 ──
     if (S.freezeTimer <= 0 && S.invulnTimer <= 0 &&
-        S.phase !== 'INTRO' && S.phase !== 'DRIVE' && S.phase !== 'SHOW_GRID') {
+        S.phase !== 'INTRO' && S.phase !== 'DRIVE' && S.phase !== 'SHOW_GRID' &&
+        S.phase !== 'CENTER' && S.phase !== 'MAGICIAN_CENTER' && S.phase !== 'SHOW_CARDS') {
         if (checkLaserCollision()) handleLaserHit();
     }
     switch (S.phase) {
@@ -667,22 +658,54 @@ export function updateLaserLevel(dt) {
     case 'SHOW_GRID':
         break;
 
-    case 'WINNING':
+    // ==================== 通用结局引导 ====================
+    // 通关或死亡后: 隐去气球 → 引导至中心 → 魔术师飞来 → 4秒 → 卡片
+
+    case 'CENTER':
         S.timer += dt;
-        // 魔术师飞到玩家面前斜上方庆祝
+        // 地面指示环
+        if (!S.centerRing) {
+            const ringGeo = new THREE.RingGeometry(0.3, 0.5, 32);
+            const ringMat = new THREE.MeshBasicMaterial({ color: 0x44ff88, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false });
+            S.centerRing = new THREE.Mesh(ringGeo, ringMat);
+            S.centerRing.rotation.x = -Math.PI / 2;
+            S.centerRing.position.set(0, 0.02, 0);
+            scene.add(S.centerRing);
+        }
+        // 检测玩家是否走到中心（直径 1m 内）
+        const distCenter = Math.sqrt(dolly.position.x * dolly.position.x + dolly.position.z * dolly.position.z);
+        if (distCenter < 0.5) {
+            scene.remove(S.centerRing);
+            S.centerRing = null;
+            S.phase = 'MAGICIAN_CENTER';
+            S.timer = 0;
+            window.__log('🎩 魔术师到场...', 's');
+        }
+        break;
+
+    case 'MAGICIAN_CENTER':
+        S.timer += dt;
+        // 魔术师飞到 (0, 1.5, -2)
         if (S.magician) {
-            // 目标位置: 玩家面前斜上方 (相对固定坐标)
-            const targetPos = new THREE.Vector3(1.5, 5.5, -3);
-            S.magician.position.lerp(targetPos, dt * 2);
-            S.magician.rotation.y += dt * 1.5;  // 快速旋转庆祝
-            S.magician.position.y = 5.5 + 0.3 * Math.sin(S.elapsed * 3);
+            const target = new THREE.Vector3(0, 1.5, -2);
+            S.magician.position.lerp(target, dt * 2);
+            S.magician.rotation.y += dt * 0.5;
         }
-        // 1.5 秒后弹出全部传说卡片
-        if (S.timer >= 1.5) {
-            S.phase = 'CLEARED';
-            onLaserCleared();
-            return;
+        // 等待 4 秒
+        if (S.timer >= 4.0) {
+            S.phase = 'SHOW_CARDS';
+            S.timer = 0;
+            window.__log('💳 生成卡片...', 's');
         }
+        break;
+
+    case 'SHOW_CARDS':
+        S.timer += dt;
+        if (!S.cardsSpawned) {
+            S.cardsSpawned = true;
+            spawnLaserEndCards();
+        }
+        updateLaserEndCards(dt);
         break;
 
     }
@@ -753,14 +776,21 @@ function checkLaserCollision() {
 // ===================== 命中 =====================
 function handleLaserHit() {
     S.failures++;
-    S.freezeTimer = 1.0;    // 黑屏1秒
+    S.freezeTimer = 0.3;    // 0.3 秒黑色闪烁
     if (S.blackOverlay) S.blackOverlay.material.opacity = 1;
     teleportPlayerToSafe();
-
     // 隐藏当前激光气球
     S.groups.forEach(g => { if (g) g.visible = false; });
-
+    S._fromDeath = true;
     window.__log('💥 撞到激光！剩余:' + (LASER_CONFIG.maxFailures - S.failures) + '次', 'e');
+}
+
+function enterCenterPhase() {
+    S.groups.forEach(g => { if (g) g.visible = false; });
+    if (S.centerRing) { scene.remove(S.centerRing); S.centerRing = null; }
+    S.phase = 'CENTER';
+    S.timer = 0;
+    window.__log('🎯 请走到场地中央（绿色光圈）', 's');
 }
 
 function resetAndRestartAnimation() {
@@ -812,6 +842,92 @@ function restoreAfterBlackout() {
 }
 
 function teleportPlayerToSafe() { dolly.position.set(0, 0, LASER_CONFIG.resetZ); }
+
+// ===================== 结局卡片 =====================
+// 通关或死亡后统一调用: 隐去气球→中心→魔术师→卡片
+
+function spawnLaserEndCards() {
+    // 3 张卡片位置: Z=-3, Y=1.5
+    const cfg = LASER_CONFIG;
+    const cardY = 1.5, cardZ = -3;
+    const cards = [
+        { x: -1.5, label: '⚔️ 攻击力↑', color: '#ffd700', bg: [160, 120, 0] },  // 金色属性
+        { x: 0, label: '🌟 技能·留白', color: '#b388ff', bg: [80, 40, 160] },   // 技能选项卡
+        { x: 1.5, label: '❤️ 生命值↑', color: '#ffd700', bg: [160, 120, 0] },  // 金色属性
+    ];
+    S._endCards = [];
+    cards.forEach((c, i) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256; canvas.height = 160;
+        const ctx = canvas.getContext('2d');
+        // 背景
+        ctx.fillStyle = `rgba(${c.bg[0]},${c.bg[1]},${c.bg[2]},0.92)`;
+        roundRect(ctx, 0, 0, 256, 160, 20); ctx.fill();
+        // 边框
+        ctx.strokeStyle = c.color; ctx.lineWidth = 6;
+        roundRect(ctx, 3, 3, 250, 154, 18); ctx.stroke();
+        // 文字
+        ctx.fillStyle = c.color;
+        ctx.font = 'bold 32px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(c.label, 128, 70);
+        // 编号
+        ctx.font = '20px monospace'; ctx.fillStyle = '#ffffff88';
+        ctx.fillText('选择' + (i + 1), 128, 120);
+
+        const tex = new THREE.CanvasTexture(canvas);
+        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+        const sprite = new THREE.Sprite(mat);
+        sprite.position.set(c.x, cardY, cardZ);
+        sprite.scale.set(0.6, 0.38, 1);
+        scene.add(sprite);
+        S._endCards.push({ sprite, pos: new THREE.Vector3(c.x, cardY, cardZ), selected: false });
+    });
+    S._cardTimer = 0;
+    window.__log('💳 3张卡片已生成，靠近选择', 's');
+}
+
+function updateLaserEndCards(dt) {
+    if (!S._endCards || S._endCardsSelected) return;
+    const pp = dolly.position;
+    for (let i = 0; i < S._endCards.length; i++) {
+        const card = S._endCards[i];
+        if (card.selected) continue;
+        // 玩家走到卡片 0.5m 范围内 = 选中
+        const dx = pp.x - card.pos.x, dz = pp.z - card.pos.z;
+        if (Math.sqrt(dx * dx + dz * dz) < 0.5) {
+            card.selected = true;
+            S._endCardsSelected = true;
+            // 移除所有卡片
+            S._endCards.forEach(c => { scene.remove(c.sprite); });
+            S._endCards = null;
+            window.__log('🎯 已选择卡片' + (i + 1), 's');
+            // 根据来源处理结局
+            handleLaserEnd(i);
+            break;
+        }
+    }
+}
+
+function handleLaserEnd(choiceIdx) {
+    // 奖励
+    STATE.playerStats.gold += 300;
+
+    if (S._fromDeath) {
+        // 死亡后: 重置
+        S._fromDeath = false;
+        if (S.failures >= LASER_CONFIG.maxFailures) {
+            // 3次失败 → 直接结束
+            onLaserFailed();
+        } else {
+            // 重置气球 + 重新开始
+            resetAndRestartAnimation();
+        }
+    } else {
+        // 通关后: 奖励 + 下一关
+        STATE.playerStats.gold += 200;  // 额外通关奖励
+        onLaserCleared();
+    }
+}
 
 // ===================== 过关/失败 =====================
 function onLaserCleared() {
