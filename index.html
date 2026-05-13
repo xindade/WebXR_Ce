@@ -357,6 +357,9 @@
                         if (!STATE.gameOverState) {
                             vr.updateInputs();
                             vr.handleMovement(dt);
+                            // 选卡交互（内部有 choiceCardsActive 判空，不影响其他阶段）
+                            game.checkLeftHandChoiceCardCollision();
+                            game.updateChoiceCards(dt);
                             laser.updateLaserLevel(dt);
                             vr.handleExit();
                         }

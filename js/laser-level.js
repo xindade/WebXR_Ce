@@ -4,6 +4,7 @@ import { scene, dolly, STATE, BOUND_X, BOUND_Z, applySkyTarget,
          sunSprite, moonSprite, starLayers } from './core.js';
 import { GLTFLoader } from '../jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from '../jsm/loaders/DRACOLoader.js';
+import { spawnBalloons, spawnChoiceCards } from './game.js';
 
 // GLTF Loader
 const dracoLoader = new DRACOLoader();
@@ -28,7 +29,7 @@ export const LASER_CONFIG = {
     ],
 
     // ── 动画时长 ──
-    magicianDur: 9.3,       // 开场动画时长（秒，与 magician_spell_091026.json 匹配）
+    magicianDur: 8.0,       // 开场念白/展示（秒）
 
     // ── 激光参数 ──
     laserLengthPreScale: 16,
@@ -55,9 +56,7 @@ const S = {
     groups: [],                 // 8个激光气球组
     gridGroup: null,            // 舞台网格
     magician: null,             // 魔术师组
-    magicianWand: null,         // 魔术棒模型引用
-    magicianWandMat: null,      // 魔术棒材质引用（用于动画驱动 glow）
-    animData: null,             // 施法动画数据 { magician: {}, wand: {} }
+    magicianWand: null,
     freezeTimer: 0,             // 冻结倒计时
     blackoutTimer: 0,           // 漆黑倒计时
     blackOverlay: null,         // 黑屏Mesh
@@ -88,6 +87,20 @@ function showShootingScene() {
 
 // ===================== 工具函数 =====================
 function easeInOut(p) { return p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2; }
+
+// roundRect polyfill（PICO 4 浏览器兼容）
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+        if (r > w/2) r = w/2;
+        if (r > h/2) r = h/2;
+        this.moveTo(x + r, y);
+        this.arcTo(x + w, y, x + w, y + h, r);
+        this.arcTo(x + w, y + h, x, y + h, r);
+        this.arcTo(x, y + h, x, y, r);
+        this.arcTo(x, y, x + w, y, r);
+        return this;
+    };
+}
 
 // ===================== 双金字塔几何体 =====================
 let _sharedBalloonGeo = null;
@@ -161,9 +174,9 @@ function createStageGrid() {
     [[0xff4444,-1],[0x4444ff,0],[0x44ff44,2]].forEach(([color, axis])=>{
         const mat = new THREE.LineBasicMaterial({ color });
         let pts;
-        if(axis===-1) pts=[new THREE.Vector3(0,LASER_CONFIG.gridAxisY,0), new THREE.Vector3(arrowLen,LASER_CONFIG.gridAxisY,0)];
-        else if(axis===0) pts=[new THREE.Vector3(0,LASER_CONFIG.gridAxisY,0), new THREE.Vector3(0,LASER_CONFIG.gridAxisY,arrowLen)];
-        else pts=[new THREE.Vector3(0,LASER_CONFIG.gridAxisY,0), new THREE.Vector3(0,arrowLen,0)];
+        if(axis===-1) pts=[new THREE.Vector3(0,0.02,0), new THREE.Vector3(arrowLen,0.02,0)];
+        else if(axis===0) pts=[new THREE.Vector3(0,0.02,0), new THREE.Vector3(0,0.02,arrowLen)];
+        else pts=[new THREE.Vector3(0,0.02,0), new THREE.Vector3(0,arrowLen,0)];
         g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
     });
     // 同时显示负轴短虚线
@@ -171,8 +184,8 @@ function createStageGrid() {
     [-1,0,2].forEach(axis=>{
         const mat = dashMat;
         let pts;
-        if(axis===-1) pts=[new THREE.Vector3(-arrowLen*0.5,LASER_CONFIG.gridAxisY,0), new THREE.Vector3(0,LASER_CONFIG.gridAxisY,0)];
-        else if(axis===0) pts=[new THREE.Vector3(0,LASER_CONFIG.gridAxisY,-arrowLen*0.5), new THREE.Vector3(0,LASER_CONFIG.gridAxisY,0)];
+        if(axis===-1) pts=[new THREE.Vector3(-arrowLen*0.5,0.02,0), new THREE.Vector3(0,0.02,0)];
+        else if(axis===0) pts=[new THREE.Vector3(0,0.02,-arrowLen*0.5), new THREE.Vector3(0,0.02,0)];
         else pts=[new THREE.Vector3(0,0.02,0), new THREE.Vector3(0,0.02,0)];
         if(axis===2) return; // Y负轴不显示
         const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat);
@@ -193,13 +206,34 @@ function createStageGrid() {
         sprite.position.copy(pos); sprite.scale.set(0.4, 0.2, 1);
         g.add(sprite);
     }
-    makeLabel('+X', new THREE.Vector3(arrowLen + 0.3, LASER_CONFIG.gridAxisY, 0), '#ff6666');
-    makeLabel('-X', new THREE.Vector3(-arrowLen - 0.3, LASER_CONFIG.gridAxisY, 0), '#666666');
-    makeLabel('+Z', new THREE.Vector3(0, LASER_CONFIG.gridAxisY, arrowLen + 0.3), '#6666ff');
-    makeLabel('-Z', new THREE.Vector3(0, LASER_CONFIG.gridAxisY, -arrowLen - 0.3), '#666666');
-    makeLabel('+Y', new THREE.Vector3(0, arrowLen + LASER_CONFIG.gridAxisY, 0), '#66ff66');
+    makeLabel('+X', new THREE.Vector3(arrowLen + 0.3, 0.02, 0), '#ff6666');
+    makeLabel('-X', new THREE.Vector3(-arrowLen - 0.3, 0.02, 0), '#666666');
+    makeLabel('+Z', new THREE.Vector3(0, 0.02, arrowLen + 0.3), '#6666ff');
+    makeLabel('-Z', new THREE.Vector3(0, 0.02, -arrowLen - 0.3), '#666666');
+    makeLabel('+Y', new THREE.Vector3(0, arrowLen + 0.3, 0), '#66ff66');
 
     return g;
+}
+
+// 创建数字标签 (Canvas Sprite)
+function makeBalloonLabel(num, position) {
+    const c = document.createElement('canvas');
+    c.width = 128; c.height = 80;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.beginPath(); ctx.roundRect(4, 4, 120, 72, 16); ctx.fill();
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.roundRect(4, 4, 120, 72, 16); ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 48px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(num), 64, 42);
+    const tex = new THREE.CanvasTexture(c);
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.position.copy(position);
+    sprite.position.y += 1.2;  // 气球上方
+    sprite.scale.set(0.4, 0.25, 1);
+    return sprite;
 }
 
 // ===================== 加载魔术师模型 =====================
@@ -230,65 +264,6 @@ function loadMagicianModel(callback) {
     });
 }
 
-// ===================== 施法动画数据 =====================
-function loadAnimationData(callback) {
-    if (S.animData) { if (callback) callback(); return; }
-    fetch('Model/magician_spell_091026.json')
-        .then(r => r.json())
-        .then(data => {
-            S.animData = data.tracks;
-            S.animDuration = data.duration;
-            window.__log('🎬 施法动画加载成功 (' + (data.sampleCount) + '帧, ' + data.duration.toFixed(1) + 's)', 's');
-            if (callback) callback();
-        })
-        .catch(() => {
-            window.__log('⚠️ 施法动画加载失败，用默认动画', 'w');
-            if (callback) callback();
-        });
-}
-
-// 在关键帧之间线性插值
-function _lerpTrack(track, t) {
-    const times = track.times;
-    if (t <= times[0]) return { pos: track.positions[0], rot: track.rotations[0], scl: track.scale[0] };
-    if (t >= times[times.length - 1]) {
-        const last = times.length - 1;
-        return { pos: track.positions[last], rot: track.rotations[last], scl: track.scale[last] };
-    }
-    // 二分查找区间
-    let lo = 0, hi = times.length - 1;
-    while (lo < hi - 1) {
-        const mid = (lo + hi) >> 1;
-        if (times[mid] <= t) lo = mid; else hi = mid;
-    }
-    const alpha = (t - times[lo]) / (times[hi] - times[lo]);
-    return {
-        pos: _lerpVec(track.positions[lo], track.positions[hi], alpha),
-        rot: _lerpQuat(track.rotations[lo], track.rotations[hi], alpha),
-        scl: _lerpScalar(track.scale[lo], track.scale[hi], alpha),
-    };
-}
-function _lerpVec(a, b, t) { return [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t]; }
-function _lerpQuat(a, b, t) {
-    const x = a[0]+(b[0]-a[0])*t, y = a[1]+(b[1]-a[1])*t, z = a[2]+(b[2]-a[2])*t, w = a[3]+(b[3]-a[3])*t;
-    const len = Math.sqrt(x*x+y*y+z*z+w*w);
-    return [x/len, y/len, z/len, w/len];
-}
-function _lerpScalar(a, b, t) { return a + (b - a) * t; }
-
-// emissive 是标量数组，同样用二分插值
-function _interpEmissive(track, t) {
-    // emissive 和 opacity 使用 wand track 的时间轴
-    const times = S.animData.wand.times;
-    const len = Math.min(track.length, times.length);
-    if (t <= times[0]) return track[0];
-    if (t >= times[len - 1]) return track[len - 1];
-    let lo = 0, hi = len - 1;
-    while (lo < hi - 1) { const mid = (lo + hi) >> 1; if (times[mid] <= t) lo = mid; else hi = mid; }
-    const alpha = (t - times[lo]) / (times[hi] - times[lo]);
-    return track[lo] + (track[hi] - track[lo]) * alpha;
-}
-
 // ===================== 初始化激光关卡 =====================
 export function startLaserLevel() {
     if (S.phase !== 'INACTIVE') return;
@@ -307,37 +282,11 @@ export function startLaserLevel() {
     applySkyTarget('day');
     S.magician = new THREE.Group();
     scene.add(S.magician);
-    loadAnimationData(() => {
-        loadMagicianModel((magGroup) => {
-            scene.remove(S.magician);
-            S.magician = magGroup;
-            scene.add(S.magician);
-            // 查找魔术棒引用
-            S.magicianWand = null;
-            S.magicianWandMat = null;
-            magGroup.traverse(c => {
-                if (!S.magicianWand && c.name && c.name.toLowerCase().includes('wand')) {
-                    S.magicianWand = c;
-                }
-                if (!S.magicianWand && c.parent && c.parent.name && c.parent.name.toLowerCase().includes('wand')) {
-                    S.magicianWand = c;
-                }
-                if (c.isMesh && c.material && c.material.emissive !== undefined) {
-                    S.magicianWandMat = c.material;
-                }
-            });
-            if (!S.magicianWand) {
-                // 回退：假定魔术师下第一个子物体是魔术棒
-                magGroup.children.forEach(child => {
-                    child.traverse(c => {
-                        if (!S.magicianWand && c !== magGroup && c.type === 'Group') S.magicianWand = c;
-                        if (c.isMesh && c.material && c.material.emissive !== undefined && !S.magicianWandMat) S.magicianWandMat = c.material;
-                    });
-                });
-            }
-            if (S.magicianWand) window.__log('🪄 魔术棒已找到', 's');
-            window.__log('🎩 魔术师就位', 's');
-        });
+    loadMagicianModel((magGroup) => {
+        scene.remove(S.magician);
+        S.magician = magGroup;
+        scene.add(S.magician);
+        window.__log('🎩 魔术师就位', 's');
     });
 
     S.phase = 'INTRO';
@@ -359,6 +308,9 @@ function spawnLaserBalloons() {
         const g = createLaserBalloon(dir, _balloonColors[i]);
         g.position.set(p[0], p[1], p[2]);
         g.userData.baseY = p[1];
+        const label = makeBalloonLabel(i + 1, new THREE.Vector3(p[0], p[1], p[2]));
+        g.userData.label = label;
+        scene.add(label);
         scene.add(g);
         S.groups.push(g);
     });
@@ -378,8 +330,14 @@ export function updateLaserLevel(dt) {
         if (S.blackOverlay) S.blackOverlay.material.opacity = 1;
         if (S.freezeTimer <= 0) {
             if (S.blackOverlay) S.blackOverlay.material.opacity = 0;
-            // 进入引导阶段
-            enterCenterPhase();
+            // 死亡路径：直接重置或结束，不走卡片引导
+            if (S.failures >= cfg.maxFailures) {
+                S.phase = 'CLEARED';
+                onLaserFailed();
+                return;
+            } else {
+                resetAndRestartAnimation();
+            }
         }
         return;
     }
@@ -387,17 +345,17 @@ export function updateLaserLevel(dt) {
     // ── 无敌保护 ──
     if (S.invulnTimer > 0) S.invulnTimer -= dt;
 
-    // ── 通关检测 ──
+    // ── 通关检测（DRIVE 阶段也可通关）──
     if (S.freezeTimer <= 0 && S.invulnTimer <= 0 &&
-        (S.phase === 'ANIM_2' || S.phase === 'ANIM_3' || S.phase === 'SHOW_GRID')) {
+        (S.phase === 'ANIM_1A' || S.phase === 'ANIM_1B' || S.phase === 'ANIM_2' || S.phase === 'ANIM_3' || S.phase === 'SHOW_GRID' || S.phase === 'DRIVE')) {
         if (dolly.position.z >= -4.0 && dolly.position.z <= -2.2 && dolly.position.x >= -2 && dolly.position.x <= 2) {
             enterCenterPhase();
         }
     }
 
-    // ── 碰撞检测 ──
+    // ── 碰撞检测（INTRO 和结局阶段不检测，其余全检测）──
     if (S.freezeTimer <= 0 && S.invulnTimer <= 0 &&
-        S.phase !== 'INTRO' && S.phase !== 'DRIVE' && S.phase !== 'SHOW_GRID' &&
+        S.phase !== 'INTRO' && S.phase !== 'SHOW_GRID' &&
         S.phase !== 'CENTER' && S.phase !== 'MAGICIAN_CENTER' && S.phase !== 'SHOW_CARDS') {
         if (checkLaserCollision()) handleLaserHit();
     }
@@ -405,32 +363,9 @@ export function updateLaserLevel(dt) {
 
     case 'INTRO':
         S.timer += dt;
-        // ── 施法动画驱动魔术师和魔术棒 ──
-        if (S.magician && S.animData) {
-            const magTrack = S.animData.magician;
-            const wandTrack = S.animData.wand;
-            // 采样时间（循环到最后停留）
-            const t = Math.min(S.timer, S.animDuration);
-            const mag = _lerpTrack(magTrack, t);
-            const wand = _lerpTrack(wandTrack, t);
-            // 魔术师：动画位置在 y≈1.2, z=-3，映射到场景 Y=cfg.magicianY, Z=0
-            const Y_OFFSET = cfg.magicianY - 1.2;
-            const Z_OFFSET = 3; // z=-3 → z=0
-            S.magician.position.set(mag.pos[0], mag.pos[1] + Y_OFFSET, mag.pos[2] + Z_OFFSET);
-            S.magician.quaternion.set(mag.rot[0], mag.rot[1], mag.rot[2], mag.rot[3]);
-            S.magician.scale.setScalar(mag.scl * cfg.magicianScale / 1.25); // 动画 scale=1.25，映射到配置 scale
-            // 魔术棒（相对魔术师的局部偏移）
-            if (S.magicianWand) {
-                S.magicianWand.position.set(wand.pos[0], wand.pos[1], wand.pos[2]);
-                S.magicianWand.quaternion.set(wand.rot[0], wand.rot[1], wand.rot[2], wand.rot[3]);
-                S.magicianWand.scale.setScalar(wand.scl * cfg.magicianScale / 1.25);
-                // 发光驱动：用 emissive 强度驱动材质 emissiveIntensity
-                if (S.magicianWandMat) {
-                    const emTrack = wandTrack.emissive;
-                    const em = _interpEmissive(emTrack, t);
-                    S.magicianWandMat.emissiveIntensity = em * 2; // 映射到 0-1 范围
-                }
-            }
+        if (S.magician) {
+            S.magician.position.y = cfg.magicianY + 0.3 * Math.sin(S.elapsed * 1.5);
+            S.magician.rotation.y += dt * 0.3;
         }
         if (S.timer >= cfg.magicianDur) {
             spawnLaserBalloons();
@@ -672,11 +607,12 @@ export function updateLaserLevel(dt) {
             S.centerRing.position.set(0, 0.02, 0);
             scene.add(S.centerRing);
         }
-        // 检测玩家是否走到中心（直径 1m 内）
+        // 检测玩家是否走到中心（直径 2m 内）或超过 10 秒自动推进
         const distCenter = Math.sqrt(dolly.position.x * dolly.position.x + dolly.position.z * dolly.position.z);
-        if (distCenter < 0.5) {
-            scene.remove(S.centerRing);
-            S.centerRing = null;
+        if (distCenter < 1.0 || S.timer > 10.0) {
+            if (S.centerRing) { scene.remove(S.centerRing); S.centerRing = null; }
+            // 修复: 强制将玩家传送到中心
+            dolly.position.set(0, 0, 0);
             S.phase = 'MAGICIAN_CENTER';
             S.timer = 0;
             window.__log('🎩 魔术师到场...', 's');
@@ -703,9 +639,22 @@ export function updateLaserLevel(dt) {
         S.timer += dt;
         if (!S.cardsSpawned) {
             S.cardsSpawned = true;
-            spawnLaserEndCards();
+            // 恢复 choiceCardGroup 可见（被 hideShootingScene 隐藏了）
+            choiceCardGroup.visible = true;
+            // 确保 choiceCardsActive 为 false 才能生成
+            STATE.choiceCardsActive = false;
+            spawnChoiceCards(true);
+            S._prevChoiceActive = false;
         }
-        updateLaserEndCards(dt);
+        // 检测卡片是否被选中 (choiceCardsActive true→false)
+        const ca = STATE.choiceCardsActive;
+        if (S._prevChoiceActive && !ca) {
+            // 卡片被选中，结束胜利流程
+            S._prevChoiceActive = false;
+            onLaserCleared();
+            return;
+        }
+        S._prevChoiceActive = ca;
         break;
 
     }
@@ -798,6 +747,7 @@ function resetAndRestartAnimation() {
     // 1. 清理当前气球（移除场景+释放几何体）
     S.groups.forEach(g => {
         // 移除标签
+        if (g.userData.label) scene.remove(g.userData.label);
         g.traverse(c => {
             if (c.geometry) c.geometry.dispose();
             if (c.material) {
@@ -815,6 +765,9 @@ function resetAndRestartAnimation() {
         const g = createLaserBalloon(dir, _balloonColors[i]);
         g.position.set(p[0], p[1], p[2]);
         g.userData.baseY = p[1];
+        const label = makeBalloonLabel(i + 1, new THREE.Vector3(p[0], p[1], p[2]));
+        g.userData.label = label;
+        scene.add(label);
         scene.add(g);
         S.groups.push(g);
     });
@@ -843,106 +796,37 @@ function restoreAfterBlackout() {
 
 function teleportPlayerToSafe() { dolly.position.set(0, 0, LASER_CONFIG.resetZ); }
 
-// ===================== 结局卡片 =====================
-// 通关或死亡后统一调用: 隐去气球→中心→魔术师→卡片
-
-function spawnLaserEndCards() {
-    // 3 张卡片位置: Z=-3, Y=1.5
-    const cfg = LASER_CONFIG;
-    const cardY = 1.5, cardZ = -3;
-    const cards = [
-        { x: -1.5, label: '⚔️ 攻击力↑', color: '#ffd700', bg: [160, 120, 0] },  // 金色属性
-        { x: 0, label: '🌟 技能·留白', color: '#b388ff', bg: [80, 40, 160] },   // 技能选项卡
-        { x: 1.5, label: '❤️ 生命值↑', color: '#ffd700', bg: [160, 120, 0] },  // 金色属性
-    ];
-    S._endCards = [];
-    cards.forEach((c, i) => {
-        const canvas = document.createElement('canvas');
-        canvas.width = 256; canvas.height = 160;
-        const ctx = canvas.getContext('2d');
-        // 背景
-        ctx.fillStyle = `rgba(${c.bg[0]},${c.bg[1]},${c.bg[2]},0.92)`;
-        roundRect(ctx, 0, 0, 256, 160, 20); ctx.fill();
-        // 边框
-        ctx.strokeStyle = c.color; ctx.lineWidth = 6;
-        roundRect(ctx, 3, 3, 250, 154, 18); ctx.stroke();
-        // 文字
-        ctx.fillStyle = c.color;
-        ctx.font = 'bold 32px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(c.label, 128, 70);
-        // 编号
-        ctx.font = '20px monospace'; ctx.fillStyle = '#ffffff88';
-        ctx.fillText('选择' + (i + 1), 128, 120);
-
-        const tex = new THREE.CanvasTexture(canvas);
-        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
-        const sprite = new THREE.Sprite(mat);
-        sprite.position.set(c.x, cardY, cardZ);
-        sprite.scale.set(0.6, 0.38, 1);
-        scene.add(sprite);
-        S._endCards.push({ sprite, pos: new THREE.Vector3(c.x, cardY, cardZ), selected: false });
-    });
-    S._cardTimer = 0;
-    window.__log('💳 3张卡片已生成，靠近选择', 's');
-}
-
-function updateLaserEndCards(dt) {
-    if (!S._endCards || S._endCardsSelected) return;
-    const pp = dolly.position;
-    for (let i = 0; i < S._endCards.length; i++) {
-        const card = S._endCards[i];
-        if (card.selected) continue;
-        // 玩家走到卡片 0.5m 范围内 = 选中
-        const dx = pp.x - card.pos.x, dz = pp.z - card.pos.z;
-        if (Math.sqrt(dx * dx + dz * dz) < 0.5) {
-            card.selected = true;
-            S._endCardsSelected = true;
-            // 移除所有卡片
-            S._endCards.forEach(c => { scene.remove(c.sprite); });
-            S._endCards = null;
-            window.__log('🎯 已选择卡片' + (i + 1), 's');
-            // 根据来源处理结局
-            handleLaserEnd(i);
-            break;
-        }
-    }
-}
-
-function handleLaserEnd(choiceIdx) {
-    // 奖励
-    STATE.playerStats.gold += 300;
-
-    if (S._fromDeath) {
-        // 死亡后: 重置
-        S._fromDeath = false;
-        if (S.failures >= LASER_CONFIG.maxFailures) {
-            // 3次失败 → 直接结束
-            onLaserFailed();
-        } else {
-            // 重置气球 + 重新开始
-            resetAndRestartAnimation();
-        }
-    } else {
-        // 通关后: 奖励 + 下一关
-        STATE.playerStats.gold += 200;  // 额外通关奖励
-        onLaserCleared();
-    }
-}
-
 // ===================== 过关/失败 =====================
 function onLaserCleared() {
+    // 确保所有关键对象恢复可见
+    balloonGroup.visible = true;
+    bulletGroup.visible = true;
+    particleGroup.visible = true;
+    debrisGroup.visible = true;
+    if (STATE.shipModel) STATE.shipModel.visible = true;
     showShootingScene();
     cleanupLaserLevel();
+    STATE.gameMode = 'shooting';
     STATE.playerStats.gold += 500;
-    import('./cards.js').then(m => m.spawnChoiceCards(true));
+    // 推进到下一波（打气球模式）
+    STATE.waveNumber++;
+    try { spawnBalloons(); } catch(e) { console.error('spawnBalloons failed:', e); window.__log('❌ 生成气球失败: ' + e.message, 'e'); }
     window.__log('💰 奖励: 全部传说选项卡+500金币', 's');
+    console.log('✅ onLaserCleared done, mode=' + STATE.gameMode + ' wave=' + STATE.waveNumber);
 }
 
 function onLaserFailed() {
+    // 确保所有关键对象恢复可见
+    balloonGroup.visible = true;
+    bulletGroup.visible = true;
+    particleGroup.visible = true;
+    debrisGroup.visible = true;
+    if (STATE.shipModel) STATE.shipModel.visible = true;
     showShootingScene();
     cleanupLaserLevel();
+    STATE.gameMode = 'shooting';
     STATE.waveNumber++;
-    import('./game.js').then(m => m.spawnBalloons());
+    try { spawnBalloons(); } catch(e) { console.error('spawnBalloons failed:', e); window.__log('❌ 生成气球失败: ' + e.message, 'e'); }
 }
 
 // ===================== 清理 =====================
@@ -953,10 +837,6 @@ export function cleanupLaserLevel() {
     if (S.magician) { scene.remove(S.magician); S.magician = null; }
     if (S.blackOverlay && S.blackOverlay.parent) { S.blackOverlay.parent.remove(S.blackOverlay); S.blackOverlay = null; }
     S.phase = 'INACTIVE';
-    STATE.gameMode = 'shooting';
-    LaserAPI._initialized = false;
-    S.freezeTimer = 0;
-    S.invulnTimer = 0;
     window.__log('🧹 激光关卡已清理', 's');
 }
 

@@ -386,35 +386,6 @@ export function checkBulletBalloonCollisions() {
             const dist = bullet.position.distanceTo(balloon.position);
             if (dist < hitRadius + 0.05) {
                 balloon.userData.hp -= STATE.playerStats.atk;
-                // ---- 爆炸范围伤害 ----
-                if (STATE.explosionRadius > 0) {
-                    const blastDmg = STATE.playerStats.atk;
-                    const blastPos = bullet.position.clone();
-                    const blastRadius = STATE.explosionRadius;
-                    for (let k = balloons.length - 1; k >= 0; k--) {
-                        if (k === j) continue; // 跳过主目标
-                        const other = balloons[k];
-                        if (!other.userData.active) continue;
-                        if (blastPos.distanceTo(other.position) < blastRadius) {
-                            other.userData.hp -= blastDmg;
-                            if (other.userData.hp <= 0) {
-                                other.userData.active = false;
-                                if (other.userData.isKnight) {
-                                    other.traverse(c => { if (c.isMesh) c.visible = false; });
-                                    STATE.playerStats.score += KNIGHT_SCORE;
-                                    STATE.playerStats.gold += KNIGHT_SCORE;
-                                } else {
-                                    other.visible = false;
-                                    STATE.playerStats.score += BALLOON_SCORE;
-                                    STATE.playerStats.gold += BALLOON_SCORE;
-                                }
-                                const dColor = other.userData.isKnight ? 0x888888 : (other.material.color ? other.material.color.getHex() : 0xff4444);
-                                spawnDebris(other.position.clone(), dColor, 4);
-                            }
-                        }
-                    }
-                    spawnParticles(blastPos, 0xff6600, 15); // 橙色爆炸粒子
-                }
                 if (!balloon.userData.isKnight && balloon.material.emissiveIntensity !== undefined) {
                     balloon.material.emissiveIntensity = 0.5;
                     setTimeout(() => {
@@ -450,19 +421,13 @@ export function checkBulletBalloonCollisions() {
 }
 
 export function checkAllBalloonsDestroyed() {
-    if (STATE.gameMode !== 'shooting') return;  // intro6/laser 模式不放卡
     const activeBalloons = balloons.filter(b => b.userData.active);
     if (activeBalloons.length === 0 && STATE.waveSpawnRemaining <= 0 && !STATE.choiceCardsActive) {
         // 触发云朵转场
         if (!STATE.transitionCloudActive) {
             startCloudTransition();
         }
-        const lvlType = getLevelType(STATE.waveNumber);
-        if (lvlType === 'final') {
-            window.__log('🎉 恭喜通关！游戏胜利', 's');
-            return;
-        }
-        spawnChoiceCards(false, lvlType);
+        spawnChoiceCards();
     }
 }
 
@@ -561,14 +526,305 @@ export function updateTransitionClouds(dt) {
     }
 }
 
-import { RARITIES, RARITIES_BOSS, getLevelType, spawnChoiceCards, clearChoiceCards, updateChoiceCards, checkLeftHandChoiceCardCollision, updateRefreshCardTexture } from './cards.js';
-import { attachBuddhaPalmToLeft, resetBuddhaPalm, updateBuddhaPalm, setBuddhaDeps } from './buddha.js';
+// ===================== 抽卡系统（稀有度版） =====================
+const RARITIES = [
+    { name: '普通', color: '#ffffff', bgColor: [60,60,60], value: 10 },
+    { name: '稀有', color: '#4da6ff', bgColor: [30,80,160], value: 20 },
+    { name: '史诗', color: '#b388ff', bgColor: [80,40,160], value: 50 },
+    { name: '传说', color: '#ffd700', bgColor: [160,120,0], value: 100 },
+];
 
-// 注入神掌需要的运行时依赖（避免循环 import）
-setBuddhaDeps(balloons, spawnDebris, spawnParticles, playPop);
+const ATTR_TYPES = [
+    { id: 'atk', label: '攻击力', icon: '⚔️', apply: (v) => { STATE.playerStats.atk += v; }, formatValue: (v) => `+${v}` },
+    { id: 'hp', label: '生命值', icon: '❤️', apply: (v) => { STATE.playerStats.hp += v; }, formatValue: (v) => `+${v}` },
+    { id: 'fireRate', label: '射速', icon: '🎯', apply: (v) => { STATE.fireRate += v/100; }, formatValue: (v) => `+${(v/100).toFixed(1)}x` },
+    { id: 'multiShot', label: '多重射击', icon: '🔫', apply: (v) => { STATE.multiShotChance += v; }, formatValue: (v) => `+${v}%` },
+];
 
-// Re-export for vr.js named imports
-export { attachBuddhaPalmToLeft };
+function createChoiceCard(chosenAttr, rarity, index) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512; canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    const bg = rarity.bgColor;
+    ctx.fillStyle = `rgba(${bg[0]},${bg[1]},${bg[2]},0.92)`;
+    roundRect(ctx, 0, 0, 512, 256, 32);
+    ctx.fill();
+    ctx.strokeStyle = rarity.color; ctx.lineWidth = 8;
+    roundRect(ctx, 4, 4, 504, 248, 28);
+    ctx.stroke();
+
+    ctx.fillStyle = rarity.color;
+    ctx.font = 'bold 52px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(chosenAttr.icon + ' ' + chosenAttr.label, 256, 80);
+
+    ctx.font = 'bold 68px monospace';
+    ctx.fillText(chosenAttr.formatValue(rarity.value), 256, 165);
+
+    ctx.font = '24px sans-serif';
+    ctx.fillText(rarity.name, 256, 210);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const geom = new THREE.PlaneGeometry(CHOICE_CARD_WIDTH, CHOICE_CARD_HEIGHT);
+    const mat = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide });
+    const card = new THREE.Mesh(geom, mat);
+    card.userData = { isChoiceCard: true, chosenAttr, rarity, index, canvas, ctx, texture };
+    return card;
+}
+
+function createRefreshCard() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512; canvas.height = 160;
+    const ctx = canvas.getContext('2d');
+    const fee = 10 * Math.pow(2, STATE.choiceRefreshCount);
+    const onCooldown = STATE.choiceRefreshCooldown > 0;
+    ctx.fillStyle = onCooldown ? 'rgba(60,60,60,0.9)' : 'rgba(30,120,60,0.9)';
+    roundRect(ctx, 0, 0, 512, 160, 24);
+    ctx.fill();
+    ctx.strokeStyle = onCooldown ? '#666' : '#44dd88'; ctx.lineWidth = 5;
+    roundRect(ctx, 3, 3, 506, 154, 21);
+    ctx.stroke();
+
+    ctx.fillStyle = onCooldown ? '#888' : '#ffffff';
+    ctx.textAlign = 'center';
+    if (onCooldown) {
+        ctx.font = 'bold 40px monospace';
+        ctx.fillText('⏳ 冷却中', 256, 80);
+    } else {
+        ctx.font = 'bold 44px monospace';
+        ctx.fillText('🔄 刷新', 256, 70);
+        ctx.font = '28px sans-serif';
+        ctx.fillStyle = '#ffd700';
+        ctx.fillText('费用: ' + fee + '金币', 256, 120);
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const geom = new THREE.PlaneGeometry(CHOICE_CARD_WIDTH, CHOICE_REFRESH_HEIGHT);
+    const mat = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide });
+    const card = new THREE.Mesh(geom, mat);
+    card.userData = { isRefreshCard: true, canvas, ctx, texture, mat };
+    return card;
+}
+
+export function updateRefreshCardTexture() {
+    for (let i = 0; i < choiceCardGroup.children.length; i++) {
+        const card = choiceCardGroup.children[i];
+        if (!card.userData.isRefreshCard) continue;
+        const { canvas, ctx, texture, mat } = card.userData;
+        if (!ctx) return;
+        const fee = 10 * Math.pow(2, STATE.choiceRefreshCount);
+        const onCooldown = STATE.choiceRefreshCooldown > 0;
+        ctx.clearRect(0, 0, 512, 160);
+        ctx.fillStyle = onCooldown ? 'rgba(60,60,60,0.9)' : 'rgba(30,120,60,0.9)';
+        roundRect(ctx, 0, 0, 512, 160, 24);
+        ctx.fill();
+        ctx.strokeStyle = onCooldown ? '#666' : '#44dd88'; ctx.lineWidth = 5;
+        roundRect(ctx, 3, 3, 506, 154, 21);
+        ctx.stroke();
+        ctx.fillStyle = onCooldown ? '#888' : '#ffffff';
+        ctx.textAlign = 'center';
+        if (onCooldown) {
+            const remainSec = Math.max(0, STATE.choiceRefreshCooldown).toFixed(1);
+            ctx.font = 'bold 36px monospace';
+            ctx.fillText('⏳ 冷却 ' + remainSec + 's', 256, 80);
+        } else {
+            ctx.font = 'bold 44px monospace';
+            ctx.fillText('🔄 刷新', 256, 70);
+            ctx.font = '28px sans-serif';
+            ctx.fillStyle = '#ffd700';
+            ctx.fillText('费用: ' + fee + '金币', 256, 120);
+        }
+        texture.needsUpdate = true;
+        break;
+    }
+}
+
+function generateRandomChoices(forceLegendary) {
+    // 随机选3个不同的属性
+    const shuffled = [...ATTR_TYPES].sort(() => Math.random() - 0.5);
+    const choices = [];
+    for (let i = 0; i < 3; i++) {
+        const rarity = forceLegendary ? RARITIES[3] : RARITIES[Math.floor(Math.random() * RARITIES.length)];
+        choices.push({ attr: shuffled[i], rarity });
+    }
+    return choices;
+}
+
+export function spawnChoiceCards(forceLegendary) {
+    if (STATE.choiceCardsActive) return;
+    STATE.choiceCardsActive = true;
+    // choiceRefreshCount 和 choiceRefreshCooldown 不在此重置，由外部调用方或 clearChoiceCards 控制
+    STATE.selectedCardIndex = -1;
+    STATE.cardHighlightTime = 0;
+
+    // 清除旧卡片
+    while (choiceCardGroup.children.length > 0) {
+        const child = choiceCardGroup.children[0];
+        if (child.material && child.material.map) child.material.map.dispose();
+        if (child.material) child.material.dispose();
+        if (child.geometry) child.geometry.dispose();
+        choiceCardGroup.remove(child);
+    }
+
+    // 记录出生点基准（固定位置，不随头显旋转）
+    const spawnAnchor = dolly.position.clone();
+    STATE.choiceCardBase = {
+        pos: spawnAnchor.clone(),
+        forward: new THREE.Vector3(0, 0, -1), // 固定朝-Z（出生点正前方）
+        right: new THREE.Vector3(1, 0, 0),
+    };
+    const base = STATE.choiceCardBase;
+    const cardY = spawnAnchor.y + 1.6 + CHOICE_CARD_Y_OFFSET; // 眼高+偏移
+
+    // 记录选择卡期间的活动限制（出生点往后1米）
+    STATE.choiceCardSpawnZ = spawnAnchor.z;
+
+    // faceTarget 用相机位置（卡片始终面向玩家）
+    const faceTarget = camera.position.clone();
+
+    // 3张属性卡
+    const choices = generateRandomChoices(forceLegendary);
+    for (let i = 0; i < 3; i++) {
+        const card = createChoiceCard(choices[i].attr, choices[i].rarity, i);
+        const offsetX = (i - 1) * CHOICE_CARD_SPACING;
+        // 记录局部偏移，每帧用当前相机重算世界坐标
+        card.userData.cardOffset = { offsetX, offsetY: 0, offsetZ: CHOICE_CARD_DISTANCE };
+        _repositionCard(card, base, cardY);
+        card.lookAt(faceTarget);
+        choiceCardGroup.add(card);
+    }
+
+    // 刷新卡（在属性卡下方）
+    const refreshCard = createRefreshCard();
+    refreshCard.userData.cardOffset = { offsetX: 0, offsetY: CHOICE_REFRESH_OFFSET_Y, offsetZ: CHOICE_CARD_DISTANCE };
+    _repositionCard(refreshCard, base, cardY);
+    refreshCard.lookAt(faceTarget);
+    choiceCardGroup.add(refreshCard);
+
+    window.__log('🎴 随机抽卡已生成（跟随头显）', 's');
+    if (STATE.choiceCardTimeout) clearTimeout(STATE.choiceCardTimeout);
+    STATE.choiceCardTimeout = setTimeout(() => {
+        if (STATE.choiceCardsActive) {
+            window.__log('⏱️ 选择卡超时', 'w');
+            clearChoiceCards();
+        }
+    }, 15000);
+}
+
+// 根据相机基准+局部偏移计算卡片世界坐标
+function _repositionCard(card, base, camY) {
+    const o = card.userData.cardOffset;
+    if (!o) return;
+    const worldX = base.pos.x + base.forward.x * o.offsetZ + base.right.x * o.offsetX;
+    const worldZ = base.pos.z + base.forward.z * o.offsetZ + base.right.z * o.offsetX;
+    card.position.set(worldX, camY + o.offsetY, worldZ);
+}
+
+const _raycaster = new THREE.Raycaster();
+
+export function updateChoiceCards(dt) {
+    if (!STATE.choiceCardsActive || choiceCardGroup.children.length === 0) return;
+    // 使用固定锚点（出生点），不随头显旋转
+    const base = STATE.choiceCardBase;
+    if (!base) return;
+    // 不更新 base.pos/forward/right — 卡位固定
+    const cardY = base.pos.y + 1.6 + CHOICE_CARD_Y_OFFSET;
+    const faceTarget = camera.position.clone();
+
+    // ---- 射线检测：左手球指向哪张卡片 ----
+    let hitCardIndex = -1;
+    if (STATE.leftRaySphere && STATE.leftController) {
+        const rayOrigin = new THREE.Vector3();
+        STATE.leftRaySphere.getWorldPosition(rayOrigin);
+        const ctrlQuat = STATE.leftController.getWorldQuaternion(new THREE.Quaternion());
+        // 与子弹相同的俯仰角
+        const pitchQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(RAY_PITCH_ANGLE * Math.PI / 180, 0, 0));
+        const finalQuat = ctrlQuat.clone().multiply(pitchQuat);
+        const rayDir = new THREE.Vector3(0, 0, -1).applyQuaternion(finalQuat);
+        _raycaster.set(rayOrigin, rayDir.normalize());
+        _raycaster.far = RAY_CAST_DISTANCE;
+        const hits = _raycaster.intersectObjects(choiceCardGroup.children, false);
+        if (hits.length > 0) {
+            hitCardIndex = choiceCardGroup.children.indexOf(hits[0].object);
+        }
+    }
+    STATE.highlightedCardIndex = hitCardIndex;
+
+    // ---- 更新每张卡片的位置 + 朝向 + 高亮动画 ----
+    choiceCardGroup.children.forEach((card, idx) => {
+        _repositionCard(card, base, cardY);
+        // 每帧重新朝向相机（确保始终可见）
+        card.lookAt(faceTarget);
+
+        // 高亮处理：被射线指向的卡片向玩家靠近并放大（属性卡+刷新卡）
+        const isHighlighted = (idx === hitCardIndex && (card.userData.isChoiceCard || card.userData.isRefreshCard));
+        const targetScale = isHighlighted ? CHOICE_HIGHLIGHT_SCALE : 1.0;
+        // 平滑插值缩放
+        const curScale = card.scale.x;
+        const newScale = curScale + (targetScale - curScale) * Math.min(1, dt * CHOICE_HIGHLIGHT_LERP);
+        card.scale.setScalar(newScale);
+
+        if (isHighlighted) {
+            // 向玩家方向移近
+            card.position.x -= base.forward.x * CHOICE_HIGHLIGHT_PULL;
+            card.position.z -= base.forward.z * CHOICE_HIGHLIGHT_PULL;
+        }
+    });
+}
+
+export function clearChoiceCards() {
+    STATE.choiceCardsActive = false;
+    STATE.choiceRefreshCount = 0;
+    STATE.choiceRefreshCooldown = 0;
+    if (STATE.choiceCardTimeout) { clearTimeout(STATE.choiceCardTimeout); STATE.choiceCardTimeout = null; }
+    while (choiceCardGroup.children.length > 0) {
+        const child = choiceCardGroup.children[0];
+        if (child.material && child.material.map) child.material.map.dispose();
+        child.material.dispose();
+        child.geometry.dispose();
+        choiceCardGroup.remove(child);
+    }
+    // 用游戏循环计时替代 setTimeout（更可靠）
+    STATE.nextWaveTimer = 1.0;
+    window.__log('⏱️ 下一波将在1秒后开始', 'i');
+}
+
+export function checkLeftHandChoiceCardCollision() {
+    if (!STATE.choiceCardsActive || !STATE.leftController) return;
+    // 扳机上升沿检测（只在按下瞬间触发一次）
+    const triggerRising = STATE.leftTrigger && !STATE.prevLeftTrigger;
+    STATE.prevLeftTrigger = STATE.leftTrigger;
+    if (!triggerRising) return;
+    const idx = STATE.highlightedCardIndex;
+    if (idx < 0 || idx >= choiceCardGroup.children.length) return;
+    const card = choiceCardGroup.children[idx];
+
+    if (card.userData.isRefreshCard) {
+        // 触碰刷新卡
+        if (STATE.choiceRefreshCooldown > 0) return;
+        const fee = 10 * Math.pow(2, STATE.choiceRefreshCount);
+        if (STATE.playerStats.gold < fee) {
+            window.__log('💰 金币不足，刷新需 ' + fee + ' 金币', 'w');
+            return;
+        }
+        STATE.playerStats.gold -= fee;
+        STATE.choiceRefreshCount++;
+        STATE.choiceRefreshCooldown = 2; // 2秒冷却
+        window.__log('🔄 刷新 (费用:' + fee + ', 下次:' + (10*Math.pow(2, STATE.choiceRefreshCount)) + ')', 's');
+        // 重新生成卡片（复用 spawnChoiceCards 的偏移系统）
+        STATE.choiceCardsActive = false;
+        spawnChoiceCards();
+        return;
+    }
+    if (card.userData.isChoiceCard) {
+        // 触碰属性卡
+        const c = card.userData;
+        c.chosenAttr.apply(c.rarity.value);
+        window.__log('✅ 选择: ' + c.chosenAttr.label + ' ' + c.chosenAttr.formatValue(c.rarity.value) + ' (' + c.rarity.name + ')', 's');
+        clearChoiceCards();
+        return;
+    }
+}
 
 // ===================== 死亡与重开 =====================
 export function gameOver() {
@@ -596,7 +852,7 @@ export function restartLevel() {
     STATE.wavePhase = 0;
     STATE.spawnBatchTimer = 0;
     setTimeout(() => {
-        spawnChoiceCards(false, getLevelType(STATE.waveNumber));
+        spawnChoiceCards();
         console.log('🎁 死亡补偿：赠送一次抽卡机会');
     }, 500);
 }
@@ -711,10 +967,6 @@ export function updateCooldowns(dt) {
         if (STATE.nextWaveTimer <= 0) {
             STATE.nextWaveTimer = 0;
             STATE.waveNumber++;
-            // 神掌解锁（必须放在激光触发之前，避免选关2时被截胡）
-            if (STATE.waveNumber >= 1 && !STATE.buddhaPalmReady) {
-                attachBuddhaPalmToLeft();
-            }
             // 波次1清空后（waveNumber === 2）→ 进入激光关卡（跳过波次2射击）
             if (STATE.waveNumber === 2) {
                 STATE.gameMode = 'laser';
@@ -723,22 +975,12 @@ export function updateCooldowns(dt) {
                 balloons.length = 0;
                 return;
             }
-            // Boss关：生成2个骑士气球
-            if (getLevelType(STATE.waveNumber) === 'boss') {
-                window.__log('👑 第' + STATE.waveNumber + '波：Boss关！2个骑士气球', 's');
-                const knight1 = createKnightBalloon(-1.5, 2, -4);
-                const knight2 = createKnightBalloon(1.5, 2, -4);
-                // 不设波次生成定时器
-                // 击破后由 checkAllBalloonsDestroyed 处理抽卡
-            } else {
-                spawnBalloons();
-                window.__log('🎈 第' + STATE.waveNumber + '波气球已生成', 's');
+            if (STATE.waveNumber >= 1 && !STATE.buddhaPalmReady) {
+                attachBuddhaPalmToLeft();
             }
+            spawnBalloons();
+            window.__log('🎈 第' + STATE.waveNumber + '波气球已生成', 's');
         }
-    }
-    // 选关跳波次时，神掌模型可能延迟加载 → 每帧重试解锁
-    if (STATE.waveNumber >= 1 && STATE.buddhaPalmModel && !STATE.buddhaPalmReady) {
-        attachBuddhaPalmToLeft();
     }
 }
 
@@ -755,17 +997,186 @@ function cycleSky(direction = 1) {
     applySkyTarget(next);
 }
 
+// roundRect 在 core 中，但 createChoiceCard 需要异步 import，这里改用内联
+function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+}
+
+// ===================== 如来神掌系统 =====================
+export function attachBuddhaPalmToLeft() {
+    if (!STATE.buddhaPalmModel || !STATE.leftGrip || STATE.buddhaPalmReady) return;
+    const palm = STATE.buddhaPalmModel.clone();
+    palm.scale.setScalar(BUDDHA_HAND_SCALE);
+    palm.position.set(BUDDHA_HAND_POS[0], BUDDHA_HAND_POS[1], BUDDHA_HAND_POS[2]);
+    palm.rotation.x = BUDDHA_HAND_ROT_X;
+    palm.visible = true;
+    STATE.leftGrip.add(palm);
+    STATE.buddhaPalmReady = true;
+    STATE.buddhaPalmState = 'IDLE';
+    STATE.buddhaPalmCooldown = 0;
+    window.__log('🖐️ 如来神掌已装备到左手', 's');
+}
+
+export function updateBuddhaPalm(dt) {
+    if (!STATE.buddhaPalmReady) return;
+
+    // 冷却倒计时
+    if (STATE.buddhaPalmCooldown > 0) {
+        STATE.buddhaPalmCooldown -= dt;
+        if (STATE.buddhaPalmCooldown < 0) STATE.buddhaPalmCooldown = 0;
+    }
+
+    const gripNow = STATE.leftBtnState.grip;
+    const gripRising = gripNow && !STATE.buddhaPrevGrip;
+    STATE.buddhaPrevGrip = gripNow;
+
+    if (STATE.buddhaPalmState === 'IDLE') {
+        if (gripRising && STATE.buddhaPalmCooldown <= 0) {
+            // 直接释放，无预览无倒计时
+            releaseBuddhaPalm();
+        }
+    }
+
+    // 更新飞行中的神掌
+    for (let i = STATE.buddhaPalmActiveList.length - 1; i >= 0; i--) {
+        const palmData = STATE.buddhaPalmActiveList[i];
+        palmData.timer += dt;
+
+        if (palmData.phase === 'falling') {
+            const t = Math.min(palmData.timer / BUDDHA_FALL_DURATION, 1);
+            palmData.mesh.position.y = palmData.startY + (palmData.targetY - palmData.startY) * t;
+            // 放大效果
+            const scale = BUDDHA_FALL_START_SCALE + (BUDDHA_FALL_END_SCALE - BUDDHA_FALL_START_SCALE) * t;
+            palmData.mesh.scale.setScalar(scale);
+
+            if (t >= 1) {
+                // 落地！
+                palmData.phase = 'impact';
+                palmData.timer = 0;
+                // 碰撞检测：半径内气球扣1000 HP
+                const palmPos = palmData.mesh.position.clone();
+                let killed = 0;
+                for (let j = balloons.length - 1; j >= 0; j--) {
+                    const b = balloons[j];
+                    if (!b.userData.active) continue;
+                    if (b.position.distanceTo(palmPos) < BUDDHA_KILL_RADIUS) {
+                        b.userData.hp -= BUDDHA_DAMAGE;
+                        if (b.userData.hp <= 0) {
+                            b.userData.active = false;
+                            if (b.userData.isKnight) {
+                                b.traverse(c => { if (c.isMesh) c.visible = false; });
+                                STATE.playerStats.score += KNIGHT_SCORE;
+                                STATE.playerStats.gold += KNIGHT_SCORE;
+                            } else {
+                                b.visible = false;
+                                STATE.playerStats.score += BALLOON_SCORE;
+                                STATE.playerStats.gold += BALLOON_SCORE;
+                            }
+                            const debrisColor = b.userData.isKnight ? 0x888888 : (b.material.color ? b.material.color.getHex() : 0xff4444);
+                            spawnDebris(b.position.clone(), debrisColor, b.userData.isKnight ? 12 : 8);
+                            spawnParticles(b.position.clone(), debrisColor, 20);
+                            playPop();
+                            killed++;
+                        }
+                    }
+                }
+                window.__log('🖐️ 如来神掌命中！击杀 ' + killed + ' 个气球', 's');
+                // 金色粒子爆炸
+                spawnParticles(palmPos, 0xffd700, BUDDHA_PARTICLE_COUNT);
+            }
+        } else if (palmData.phase === 'impact') {
+            // 延迟后清理
+            if (palmData.timer > BUDDHA_IMPACT_CLEANUP) {
+                palmData.mesh.traverse(c => {
+                    if (c.geometry) c.geometry.dispose();
+                    if (c.material) {
+                        if (Array.isArray(c.material)) c.material.forEach(m => m.dispose());
+                        else c.material.dispose();
+                    }
+                });
+                buddhaPalmGroup.remove(palmData.mesh);
+                STATE.buddhaPalmActiveList.splice(i, 1);
+            }
+        }
+    }
+}
+
+function releaseBuddhaPalm() {
+    STATE.buddhaPalmState = 'IDLE';
+    STATE.buddhaPalmCooldown = BUDDHA_COOLDOWN;
+    window.__log('🖐️ 如来神掌释放！', 's');
+
+    if (!STATE.buddhaPalmModel) return;
+
+    // 创建飞行神掌
+    const palm = STATE.buddhaPalmModel.clone();
+    palm.rotation.x = BUDDHA_HAND_ROT_X;  // 平放角度
+    const camPos = camera.position.clone();
+    camera.getWorldPosition(camPos);
+    const aimDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    aimDir.y = 0;
+    if (aimDir.lengthSq() < 0.001) aimDir.set(0, 0, -1);
+    aimDir.normalize();
+    STATE.buddhaAimDirection.copy(aimDir);
+    const startPos = camPos.clone().addScaledVector(aimDir, BUDDHA_FALL_FORWARD);
+    startPos.y += BUDDHA_FALL_HEIGHT;
+    const targetPos = camPos.clone().addScaledVector(aimDir, BUDDHA_FALL_FORWARD);
+    targetPos.y = camPos.y;
+
+    palm.position.copy(startPos);
+    palm.scale.setScalar(BUDDHA_FALL_START_SCALE);
+    palm.visible = true;
+    palm.traverse(c => { if (c.isMesh) c.castShadow = false; });
+    buddhaPalmGroup.add(palm);
+
+    STATE.buddhaPalmActiveList.push({
+        mesh: palm,
+        timer: 0,
+        phase: 'falling',
+        startY: startPos.y,
+        targetY: targetPos.y
+    });
+}
+
+export function resetBuddhaPalm() {
+    // 清除所有飞行中的神掌
+    for (let i = STATE.buddhaPalmActiveList.length - 1; i >= 0; i--) {
+        const palmData = STATE.buddhaPalmActiveList[i];
+        palmData.mesh.traverse(c => {
+            if (c.geometry) c.geometry.dispose();
+            if (c.material) {
+                if (Array.isArray(c.material)) c.material.forEach(m => m.dispose());
+                else c.material.dispose();
+            }
+        });
+        buddhaPalmGroup.remove(palmData.mesh);
+    }
+    STATE.buddhaPalmActiveList.length = 0;
+    STATE.buddhaPalmState = 'IDLE';
+    STATE.buddhaPalmCooldown = 0;
+    STATE.buddhaPrevGrip = false;
+}
 
 // ===================== 聚合导出 =====================
+// 聚合导出（避免 PICO 4 浏览器 import * as 兼容性问题）
 export const GameAPI = {
     setAudio, setVR,
     updateCooldowns, updateBullets, updateBalloons, updateWaveSpawning,
-    updateChoiceCards, checkBulletBalloonCollisions, checkLeftHandChoiceCardCollision,
+    updateChoiceCards,
+    checkBulletBalloonCollisions, checkLeftHandChoiceCardCollision,
     updateDebris, updateParticles, checkVRSkySwitch,
     spawnBalloons, restartLevel, gameOver,
-    spawnChoiceCards, clearChoiceCards,
     updateBuddhaPalm, attachBuddhaPalmToLeft, resetBuddhaPalm,
     initTransitionClouds, updateTransitionClouds, startCloudTransition,
-    createKnightBalloon,
     balloons, bullets
 };
