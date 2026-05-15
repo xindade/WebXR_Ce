@@ -114,7 +114,7 @@ export const RECOIL_DECAY = 0.80;           // 衰减系数/帧
 //     y: 1.57  ≈ 90° 绕Y轴旋转（模型正面朝前）
 //     z: 0     = 不旋转
 export const SHIP_SCALE = 18.0;
-export const SHIP_POS = [0, -3, 0.05];
+export const SHIP_POS = [0, -3.5, 0.05];
 export const SHIP_ROT = [0, -1.57, 0];
 
 export const DEBRIS_COUNT = 30;
@@ -686,4 +686,85 @@ export function roundRect(ctx, x, y, w, h, r) {
     ctx.lineTo(x, y + r);
     ctx.quadraticCurveTo(x, y, x + r, y);
     ctx.closePath();
+}
+
+// ===================== 射击关卡坐标网格 =====================
+// 固定在世界原点（scene下），不跟随dolly
+export const GRID_Y = 0.01;                     // 网格高度（米，浮在基底上方）
+let _shootingGridGroup = null;                  // 内部引用，用于清理
+
+export function createShootingGrid() {
+    // 如果已存在则先清理
+    if (_shootingGridGroup) { scene.remove(_shootingGridGroup); _shootingGridGroup = null; }
+    const g = new THREE.Group();
+    const halfX = BOUND_X, halfZ = BOUND_Z;
+    const gridMat = new THREE.LineBasicMaterial({ color: 0x4488aa, transparent: true, opacity: 0.35 });
+
+    // 网格线（每1m一条）
+    for (let i = -halfX; i <= halfX; i++) {
+        const pts = [new THREE.Vector3(i, GRID_Y, -halfZ), new THREE.Vector3(i, GRID_Y, halfZ)];
+        g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), gridMat));
+    }
+    for (let i = -halfZ; i <= halfZ; i++) {
+        const pts = [new THREE.Vector3(-halfX, GRID_Y, i), new THREE.Vector3(halfX, GRID_Y, i)];
+        g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), gridMat));
+    }
+
+    // 坐标轴箭头 (X红, Z蓝, Y绿)
+    const arrowLen = 1.0;
+    const makeAxis = (color, pts) => {
+        const mat = new THREE.LineBasicMaterial({ color });
+        g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+    };
+    makeAxis(0xff4444, [new THREE.Vector3(0,GRID_Y,0), new THREE.Vector3(arrowLen,GRID_Y,0)]);
+    makeAxis(0x4444ff, [new THREE.Vector3(0,GRID_Y,0), new THREE.Vector3(0,GRID_Y,arrowLen)]);
+    makeAxis(0x44ff44, [new THREE.Vector3(0,GRID_Y,0), new THREE.Vector3(0,arrowLen+GRID_Y,0)]);
+
+    // 轴标签
+    function makeLabel(text, pos, color) {
+        const c = document.createElement('canvas');
+        c.width = 128; c.height = 64;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = color; ctx.font = 'bold 36px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(text, 64, 34);
+        const tex = new THREE.CanvasTexture(c);
+        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+        const sprite = new THREE.Sprite(mat);
+        sprite.position.copy(pos); sprite.scale.set(0.35, 0.18, 1);
+        g.add(sprite);
+    }
+    makeLabel('X', new THREE.Vector3(arrowLen+0.3, GRID_Y, 0), '#ff6666');
+    makeLabel('Z', new THREE.Vector3(0, GRID_Y, arrowLen+0.3), '#6666ff');
+    makeLabel('Y', new THREE.Vector3(0, arrowLen+GRID_Y, 0), '#66ff66');
+
+    // 每格标记长度数字（每隔1m标一个数字）
+    const gridNumbers = [-2,-1,0,1,2];
+    gridNumbers.forEach(x => {
+        if (x !== -halfX && x !== halfX) {
+            const lbl = document.createElement('canvas');
+            lbl.width = 64; lbl.height = 48;
+            const lctx = lbl.getContext('2d');
+            lctx.fillStyle = '#8899aa'; lctx.font = 'bold 24px monospace'; lctx.textAlign = 'center'; lctx.textBaseline = 'middle';
+            lctx.fillText(String(x), 32, 28);
+            const tex = new THREE.CanvasTexture(lbl);
+            const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+            const sprite = new THREE.Sprite(mat);
+            sprite.position.set(x, GRID_Y, -halfZ - 0.4);
+            sprite.scale.set(0.2, 0.15, 1);
+            g.add(sprite);
+        }
+    });
+
+    scene.add(g);
+    _shootingGridGroup = g;
+    __log('📐 射击坐标网格已创建', 's');
+}
+
+export function destroyShootingGrid() {
+    if (_shootingGridGroup) {
+        _shootingGridGroup.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
+        scene.remove(_shootingGridGroup);
+        _shootingGridGroup = null;
+        __log('📐 射击坐标网格已清理', 's');
+    }
 }

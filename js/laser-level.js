@@ -159,9 +159,9 @@ function createStageGrid() {
     [[0xff4444,-1],[0x4444ff,0],[0x44ff44,2]].forEach(([color, axis])=>{
         const mat = new THREE.LineBasicMaterial({ color });
         let pts;
-        if(axis===-1) pts=[new THREE.Vector3(0,0.02,0), new THREE.Vector3(arrowLen,0.02,0)];
-        else if(axis===0) pts=[new THREE.Vector3(0,0.02,0), new THREE.Vector3(0,0.02,arrowLen)];
-        else pts=[new THREE.Vector3(0,0.02,0), new THREE.Vector3(0,arrowLen,0)];
+        if(axis===-1) pts=[new THREE.Vector3(0,LASER_CONFIG.gridAxisY,0), new THREE.Vector3(arrowLen,LASER_CONFIG.gridAxisY,0)];
+        else if(axis===0) pts=[new THREE.Vector3(0,LASER_CONFIG.gridAxisY,0), new THREE.Vector3(0,LASER_CONFIG.gridAxisY,arrowLen)];
+        else pts=[new THREE.Vector3(0,LASER_CONFIG.gridAxisY,0), new THREE.Vector3(0,arrowLen,0)];
         g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
     });
     // 同时显示负轴短虚线
@@ -169,8 +169,8 @@ function createStageGrid() {
     [-1,0,2].forEach(axis=>{
         const mat = dashMat;
         let pts;
-        if(axis===-1) pts=[new THREE.Vector3(-arrowLen*0.5,0.02,0), new THREE.Vector3(0,0.02,0)];
-        else if(axis===0) pts=[new THREE.Vector3(0,0.02,-arrowLen*0.5), new THREE.Vector3(0,0.02,0)];
+        if(axis===-1) pts=[new THREE.Vector3(-arrowLen*0.5,LASER_CONFIG.gridAxisY,0), new THREE.Vector3(0,LASER_CONFIG.gridAxisY,0)];
+        else if(axis===0) pts=[new THREE.Vector3(0,LASER_CONFIG.gridAxisY,-arrowLen*0.5), new THREE.Vector3(0,LASER_CONFIG.gridAxisY,0)];
         else pts=[new THREE.Vector3(0,0.02,0), new THREE.Vector3(0,0.02,0)];
         if(axis===2) return; // Y负轴不显示
         const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat);
@@ -191,34 +191,13 @@ function createStageGrid() {
         sprite.position.copy(pos); sprite.scale.set(0.4, 0.2, 1);
         g.add(sprite);
     }
-    makeLabel('+X', new THREE.Vector3(arrowLen + 0.3, 0.02, 0), '#ff6666');
-    makeLabel('-X', new THREE.Vector3(-arrowLen - 0.3, 0.02, 0), '#666666');
-    makeLabel('+Z', new THREE.Vector3(0, 0.02, arrowLen + 0.3), '#6666ff');
-    makeLabel('-Z', new THREE.Vector3(0, 0.02, -arrowLen - 0.3), '#666666');
-    makeLabel('+Y', new THREE.Vector3(0, arrowLen + 0.3, 0), '#66ff66');
+    makeLabel('+X', new THREE.Vector3(arrowLen + 0.3, LASER_CONFIG.gridAxisY, 0), '#ff6666');
+    makeLabel('-X', new THREE.Vector3(-arrowLen - 0.3, LASER_CONFIG.gridAxisY, 0), '#666666');
+    makeLabel('+Z', new THREE.Vector3(0, LASER_CONFIG.gridAxisY, arrowLen + 0.3), '#6666ff');
+    makeLabel('-Z', new THREE.Vector3(0, LASER_CONFIG.gridAxisY, -arrowLen - 0.3), '#666666');
+    makeLabel('+Y', new THREE.Vector3(0, arrowLen + LASER_CONFIG.gridAxisY, 0), '#66ff66');
 
     return g;
-}
-
-// 创建数字标签 (Canvas Sprite)
-function makeBalloonLabel(num, position) {
-    const c = document.createElement('canvas');
-    c.width = 128; c.height = 80;
-    const ctx = c.getContext('2d');
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.beginPath(); ctx.roundRect(4, 4, 120, 72, 16); ctx.fill();
-    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.roundRect(4, 4, 120, 72, 16); ctx.stroke();
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 48px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(String(num), 64, 42);
-    const tex = new THREE.CanvasTexture(c);
-    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
-    const sprite = new THREE.Sprite(mat);
-    sprite.position.copy(position);
-    sprite.position.y += 1.2;  // 气球上方
-    sprite.scale.set(0.4, 0.25, 1);
-    return sprite;
 }
 
 // ===================== 加载魔术师模型 =====================
@@ -293,9 +272,6 @@ function spawnLaserBalloons() {
         const g = createLaserBalloon(dir, _balloonColors[i]);
         g.position.set(p[0], p[1], p[2]);
         g.userData.baseY = p[1];
-        const label = makeBalloonLabel(i + 1, new THREE.Vector3(p[0], p[1], p[2]));
-        g.userData.label = label;
-        scene.add(label);
         scene.add(g);
         S.groups.push(g);
     });
@@ -682,7 +658,6 @@ function resetAndRestartAnimation() {
     // 1. 清理当前气球（移除场景+释放几何体）
     S.groups.forEach(g => {
         // 移除标签
-        if (g.userData.label) scene.remove(g.userData.label);
         g.traverse(c => {
             if (c.geometry) c.geometry.dispose();
             if (c.material) {
@@ -700,9 +675,6 @@ function resetAndRestartAnimation() {
         const g = createLaserBalloon(dir, _balloonColors[i]);
         g.position.set(p[0], p[1], p[2]);
         g.userData.baseY = p[1];
-        const label = makeBalloonLabel(i + 1, new THREE.Vector3(p[0], p[1], p[2]));
-        g.userData.label = label;
-        scene.add(label);
         scene.add(g);
         S.groups.push(g);
     });
@@ -736,7 +708,6 @@ function onLaserCleared() {
     showShootingScene();
     cleanupLaserLevel();
     STATE.playerStats.gold += 500;
-    // 全部传说卡片
     import('./game.js').then(m => m.spawnChoiceCards(true));
     window.__log('💰 奖励: 全部传说选项卡+500金币', 's');
 }
@@ -756,6 +727,10 @@ export function cleanupLaserLevel() {
     if (S.magician) { scene.remove(S.magician); S.magician = null; }
     if (S.blackOverlay && S.blackOverlay.parent) { S.blackOverlay.parent.remove(S.blackOverlay); S.blackOverlay = null; }
     S.phase = 'INACTIVE';
+    STATE.gameMode = 'shooting';
+    LaserAPI._initialized = false;
+    S.freezeTimer = 0;
+    S.invulnTimer = 0;
     window.__log('🧹 激光关卡已清理', 's');
 }
 

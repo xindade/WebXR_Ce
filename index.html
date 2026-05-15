@@ -166,7 +166,7 @@
 
     <script type="module">
         import * as THREE from './three.module.js';
-        import { renderer, scene, camera, choiceCardGroup, setShadow, updateSkyTransition, applySkyTarget, STATE } from './js/core.js';
+        import { renderer, scene, camera, choiceCardGroup, setShadow, updateSkyTransition, applySkyTarget, STATE, createShootingGrid, destroyShootingGrid } from './js/core.js';
         import { GameAPI as game } from './js/game.js';
         import { VrAPI as vr } from './js/vr.js';
         import { LaserAPI as laser } from './js/laser-level.js';
@@ -365,9 +365,10 @@
                         STATE.playerStats.gold = 1000;
                         STATE.playerStats.atk = 100;
                         if (selectedLevel === 3) {
-                            // 第三关：直接进入激光关卡
+                            // 第三关：waveNumber=2 保持与自然流程一致
+                            STATE.waveNumber = 2;
                             STATE.gameMode = 'laser';
-                            window.__log('🎆 第三关：激光关卡启动', 's');
+                            window.__log('🎆 第三关：激光关卡启动 wave=2', 's');
                         } else {
                             STATE.waveNumber = selectedLevel - 1;
                             window.__log('关卡' + selectedLevel + ' 生效: gold=' + STATE.playerStats.gold + ' atk=' + STATE.playerStats.atk + ' wave=' + STATE.waveNumber, 's');
@@ -377,6 +378,7 @@
                         laser.startLaserLevel();
                         laser._initialized = true;
                     } else {
+                        createShootingGrid();
                         game.spawnBalloons();
                         window.__log('游戏开始 / 气球生成', 's');
                     }
@@ -398,6 +400,7 @@
             STATE.shipHp = 100;
             STATE.shipHitFlash = 0;
             STATE.gameMode = 'shooting';
+            destroyShootingGrid();
             laser.cleanupLaserLevel();
             laser._initialized = false;
             STATE.leftHandGunEnabled = false;

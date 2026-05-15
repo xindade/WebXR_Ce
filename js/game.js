@@ -427,7 +427,12 @@ export function checkAllBalloonsDestroyed() {
         if (!STATE.transitionCloudActive) {
             startCloudTransition();
         }
-        spawnChoiceCards();
+        const lvlType = getLevelType(STATE.waveNumber);
+        if (lvlType === 'final') {
+            window.__log('🎉 恭喜通关！游戏胜利', 's');
+            return;
+        }
+        spawnChoiceCards(false, lvlType);
     }
 }
 
@@ -527,16 +532,41 @@ export function updateTransitionClouds(dt) {
 }
 
 // ===================== 抽卡系统（稀有度版） =====================
+// 普通关稀有度（带概率权重）
 const RARITIES = [
-    { name: '普通', color: '#ffffff', bgColor: [60,60,60], value: 10 },
-    { name: '稀有', color: '#4da6ff', bgColor: [30,80,160], value: 20 },
-    { name: '史诗', color: '#b388ff', bgColor: [80,40,160], value: 50 },
-    { name: '传说', color: '#ffd700', bgColor: [160,120,0], value: 100 },
+    { name: '普通', color: '#ffffff', bgColor: [60,60,60], value: 10, weight: 40 },
+    { name: '稀有', color: '#4da6ff', bgColor: [30,80,160], value: 20, weight: 30 },
+    { name: '史诗', color: '#b388ff', bgColor: [80,40,160], value: 50, weight: 20 },
+    { name: '传说', color: '#ffd700', bgColor: [160,120,0], value: 100, weight: 10 },
 ];
+// Boss关稀有度（追加红色 = 传说2倍）
+const RARITIES_BOSS = [
+    ...RARITIES,
+    { name: '红色', color: '#ff2222', bgColor: [160,30,30], value: 200, weight: 5 },
+];
+
+// 按权重随机选择稀有度
+function pickRarityByWeight(rarities) {
+    const total = rarities.reduce((s, r) => s + r.weight, 0);
+    let roll = Math.random() * total;
+    for (const r of rarities) {
+        roll -= r.weight;
+        if (roll <= 0) return r;
+    }
+    return rarities[rarities.length - 1];
+}
+
+// 关卡类型判定
+function getLevelType(waveNumber) {
+    if (waveNumber === 18) return 'final';   // 通关
+    if (waveNumber === 6 || waveNumber === 12) return 'boss';
+    if (waveNumber === 2) return 'mech';     // 激光关
+    return 'normal';
+}
 
 const ATTR_TYPES = [
     { id: 'atk', label: '攻击力', icon: '⚔️', apply: (v) => { STATE.playerStats.atk += v; }, formatValue: (v) => `+${v}` },
-    { id: 'hp', label: '生命值', icon: '❤️', apply: (v) => { STATE.playerStats.hp += v; }, formatValue: (v) => `+${v}` },
+    { id: 'hp', label: '生命值', icon: '❤️', apply: (v) => { STATE.shipHp = Math.min(SHIP_MAX_HP, STATE.shipHp + v); }, formatValue: (v) => `+${v}` },
     { id: 'fireRate', label: '射速', icon: '🎯', apply: (v) => { STATE.fireRate += v/100; }, formatValue: (v) => `+${(v/100).toFixed(1)}x` },
     { id: 'multiShot', label: '多重射击', icon: '🔫', apply: (v) => { STATE.multiShotChance += v; }, formatValue: (v) => `+${v}%` },
 ];
@@ -639,18 +669,25 @@ export function updateRefreshCardTexture() {
     }
 }
 
-function generateRandomChoices(forceLegendary) {
+function generateRandomChoices(forceLegendary, levelType) {
     // 随机选3个不同的属性
     const shuffled = [...ATTR_TYPES].sort(() => Math.random() - 0.5);
     const choices = [];
     for (let i = 0; i < 3; i++) {
-        const rarity = forceLegendary ? RARITIES[3] : RARITIES[Math.floor(Math.random() * RARITIES.length)];
+        let rarity;
+        if (forceLegendary) {
+            rarity = RARITIES[3]; // 传说
+        } else if (levelType === 'boss') {
+            rarity = pickRarityByWeight(RARITIES_BOSS);
+        } else {
+            rarity = pickRarityByWeight(RARITIES);
+        }
         choices.push({ attr: shuffled[i], rarity });
     }
     return choices;
 }
 
-export function spawnChoiceCards(forceLegendary) {
+export function spawnChoiceCards(forceLegendary, levelType) {
     if (STATE.choiceCardsActive) return;
     STATE.choiceCardsActive = true;
     // choiceRefreshCount 和 choiceRefreshCooldown 不在此重置，由外部调用方或 clearChoiceCards 控制
@@ -811,7 +848,7 @@ export function checkLeftHandChoiceCardCollision() {
         window.__log('🔄 刷新 (费用:' + fee + ', 下次:' + (10*Math.pow(2, STATE.choiceRefreshCount)) + ')', 's');
         // 重新生成卡片（复用 spawnChoiceCards 的偏移系统）
         STATE.choiceCardsActive = false;
-        spawnChoiceCards();
+        spawnChoiceCards(false, getLevelType(STATE.waveNumber));
         return;
     }
     if (card.userData.isChoiceCard) {
@@ -850,7 +887,7 @@ export function restartLevel() {
     STATE.wavePhase = 0;
     STATE.spawnBatchTimer = 0;
     setTimeout(() => {
-        spawnChoiceCards();
+        spawnChoiceCards(false, getLevelType(STATE.waveNumber));
         console.log('🎁 死亡补偿：赠送一次抽卡机会');
     }, 500);
 }
@@ -965,6 +1002,10 @@ export function updateCooldowns(dt) {
         if (STATE.nextWaveTimer <= 0) {
             STATE.nextWaveTimer = 0;
             STATE.waveNumber++;
+            // 神掌解锁（必须放在激光触发之前，避免选关2时被截胡）
+            if (STATE.waveNumber >= 1 && !STATE.buddhaPalmReady) {
+                attachBuddhaPalmToLeft();
+            }
             // 波次1清空后（waveNumber === 2）→ 进入激光关卡（跳过波次2射击）
             if (STATE.waveNumber === 2) {
                 STATE.gameMode = 'laser';
@@ -973,11 +1014,17 @@ export function updateCooldowns(dt) {
                 balloons.length = 0;
                 return;
             }
-            if (STATE.waveNumber >= 1 && !STATE.buddhaPalmReady) {
-                attachBuddhaPalmToLeft();
+            // Boss关：生成2个骑士气球
+            if (getLevelType(STATE.waveNumber) === 'boss') {
+                window.__log('👑 第' + STATE.waveNumber + '波：Boss关！2个骑士气球', 's');
+                const knight1 = createKnightBalloon(-1.5, 2, -4);
+                const knight2 = createKnightBalloon(1.5, 2, -4);
+                // 不设波次生成定时器
+                // 击破后由 checkAllBalloonsDestroyed 处理抽卡
+            } else {
+                spawnBalloons();
+                window.__log('🎈 第' + STATE.waveNumber + '波气球已生成', 's');
             }
-            spawnBalloons();
-            window.__log('🎈 第' + STATE.waveNumber + '波气球已生成', 's');
         }
     }
 }
