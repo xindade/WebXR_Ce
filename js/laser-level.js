@@ -818,7 +818,7 @@ function onLaserCleared() {
     showShootingScene();
     cleanupLaserLevel();
     STATE.playerStats.gold += 500;
-    import('./game.js').then(m => m.spawnChoiceCards(true));
+    import('./cards.js').then(m => m.spawnChoiceCards(true));
     window.__log('💰 奖励: 全部传说选项卡+500金币', 's');
 }
 

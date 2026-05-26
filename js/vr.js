@@ -394,10 +394,6 @@ export function handleMovement(dt) {
     dolly.position.x = Math.max(-BOUND_X, Math.min(BOUND_X, dolly.position.x + dx));
     const dzNew = dolly.position.z + dz;
     dolly.position.z = Math.max(-BOUND_Z, Math.min(BOUND_Z, dzNew));
-    // 选卡期间：限制玩家只能往出生点之后1米活动
-    if (STATE.choiceCardsActive && STATE.choiceCardSpawnZ !== undefined) {
-        dolly.position.z = Math.max(STATE.choiceCardSpawnZ, Math.min(STATE.choiceCardSpawnZ + 1.0, dolly.position.z));
-    }
 }
 
 export function handleExit() {

@@ -631,7 +631,7 @@ export const buddhaPalmGroup = new THREE.Group();
 scene.add(buddhaPalmGroup);
 
 export const choiceCardGroup = new THREE.Group();
-dolly.add(choiceCardGroup);
+scene.add(choiceCardGroup);  // 挂在 scene 而非 dolly，避免跟随玩家旋转
 
 // ===================== 加载管理 =====================
 export function checkAllLoaded(msg) {
