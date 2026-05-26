@@ -207,14 +207,14 @@ export function spawnChoiceCards(forceLegendary, levelType) {
     _repositionCard(refreshCard, base, cardY);
     choiceCardGroup.add(refreshCard);
 
-    window.__log('🎴 随机抽卡已生成（跟随头显）', 's');
+    window.__log('🎴 随机抽卡已生成（60秒超时）', 's');
     if (STATE.choiceCardTimeout) clearTimeout(STATE.choiceCardTimeout);
     STATE.choiceCardTimeout = setTimeout(() => {
         if (STATE.choiceCardsActive) {
             window.__log('⏱️ 选择卡超时', 'w');
             clearChoiceCards();
         }
-    }, 15000);
+    }, 60000);  // 调试用，正式改为15000
 }
 
 // 卡片直接挂在 scene 下，card.position 即世界坐标
