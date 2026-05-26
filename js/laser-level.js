@@ -28,7 +28,7 @@ export const LASER_CONFIG = {
     ],
 
     // ── 动画时长 ──
-    magicianDur: 8.0,       // 开场念白/展示（秒）
+    magicianDur: 9.3,       // 开场动画时长（秒，与 magician_spell_091026.json 匹配）
 
     // ── 激光参数 ──
     laserLengthPreScale: 16,
@@ -55,7 +55,9 @@ const S = {
     groups: [],                 // 8个激光气球组
     gridGroup: null,            // 舞台网格
     magician: null,             // 魔术师组
-    magicianWand: null,
+    magicianWand: null,         // 魔术棒模型引用
+    magicianWandMat: null,      // 魔术棒材质引用（用于动画驱动 glow）
+    animData: null,             // 施法动画数据 { magician: {}, wand: {} }
     freezeTimer: 0,             // 冻结倒计时
     blackoutTimer: 0,           // 漆黑倒计时
     blackOverlay: null,         // 黑屏Mesh
@@ -228,6 +230,65 @@ function loadMagicianModel(callback) {
     });
 }
 
+// ===================== 施法动画数据 =====================
+function loadAnimationData(callback) {
+    if (S.animData) { if (callback) callback(); return; }
+    fetch('Model/magician_spell_091026.json')
+        .then(r => r.json())
+        .then(data => {
+            S.animData = data.tracks;
+            S.animDuration = data.duration;
+            window.__log('🎬 施法动画加载成功 (' + (data.sampleCount) + '帧, ' + data.duration.toFixed(1) + 's)', 's');
+            if (callback) callback();
+        })
+        .catch(() => {
+            window.__log('⚠️ 施法动画加载失败，用默认动画', 'w');
+            if (callback) callback();
+        });
+}
+
+// 在关键帧之间线性插值
+function _lerpTrack(track, t) {
+    const times = track.times;
+    if (t <= times[0]) return { pos: track.positions[0], rot: track.rotations[0], scl: track.scale[0] };
+    if (t >= times[times.length - 1]) {
+        const last = times.length - 1;
+        return { pos: track.positions[last], rot: track.rotations[last], scl: track.scale[last] };
+    }
+    // 二分查找区间
+    let lo = 0, hi = times.length - 1;
+    while (lo < hi - 1) {
+        const mid = (lo + hi) >> 1;
+        if (times[mid] <= t) lo = mid; else hi = mid;
+    }
+    const alpha = (t - times[lo]) / (times[hi] - times[lo]);
+    return {
+        pos: _lerpVec(track.positions[lo], track.positions[hi], alpha),
+        rot: _lerpQuat(track.rotations[lo], track.rotations[hi], alpha),
+        scl: _lerpScalar(track.scale[lo], track.scale[hi], alpha),
+    };
+}
+function _lerpVec(a, b, t) { return [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t]; }
+function _lerpQuat(a, b, t) {
+    const x = a[0]+(b[0]-a[0])*t, y = a[1]+(b[1]-a[1])*t, z = a[2]+(b[2]-a[2])*t, w = a[3]+(b[3]-a[3])*t;
+    const len = Math.sqrt(x*x+y*y+z*z+w*w);
+    return [x/len, y/len, z/len, w/len];
+}
+function _lerpScalar(a, b, t) { return a + (b - a) * t; }
+
+// emissive 是标量数组，同样用二分插值
+function _interpEmissive(track, t) {
+    // emissive 和 opacity 使用 wand track 的时间轴
+    const times = S.animData.wand.times;
+    const len = Math.min(track.length, times.length);
+    if (t <= times[0]) return track[0];
+    if (t >= times[len - 1]) return track[len - 1];
+    let lo = 0, hi = len - 1;
+    while (lo < hi - 1) { const mid = (lo + hi) >> 1; if (times[mid] <= t) lo = mid; else hi = mid; }
+    const alpha = (t - times[lo]) / (times[hi] - times[lo]);
+    return track[lo] + (track[hi] - track[lo]) * alpha;
+}
+
 // ===================== 初始化激光关卡 =====================
 export function startLaserLevel() {
     if (S.phase !== 'INACTIVE') return;
@@ -246,11 +307,37 @@ export function startLaserLevel() {
     applySkyTarget('day');
     S.magician = new THREE.Group();
     scene.add(S.magician);
-    loadMagicianModel((magGroup) => {
-        scene.remove(S.magician);
-        S.magician = magGroup;
-        scene.add(S.magician);
-        window.__log('🎩 魔术师就位', 's');
+    loadAnimationData(() => {
+        loadMagicianModel((magGroup) => {
+            scene.remove(S.magician);
+            S.magician = magGroup;
+            scene.add(S.magician);
+            // 查找魔术棒引用
+            S.magicianWand = null;
+            S.magicianWandMat = null;
+            magGroup.traverse(c => {
+                if (!S.magicianWand && c.name && c.name.toLowerCase().includes('wand')) {
+                    S.magicianWand = c;
+                }
+                if (!S.magicianWand && c.parent && c.parent.name && c.parent.name.toLowerCase().includes('wand')) {
+                    S.magicianWand = c;
+                }
+                if (c.isMesh && c.material && c.material.emissive !== undefined) {
+                    S.magicianWandMat = c.material;
+                }
+            });
+            if (!S.magicianWand) {
+                // 回退：假定魔术师下第一个子物体是魔术棒
+                magGroup.children.forEach(child => {
+                    child.traverse(c => {
+                        if (!S.magicianWand && c !== magGroup && c.type === 'Group') S.magicianWand = c;
+                        if (c.isMesh && c.material && c.material.emissive !== undefined && !S.magicianWandMat) S.magicianWandMat = c.material;
+                    });
+                });
+            }
+            if (S.magicianWand) window.__log('🪄 魔术棒已找到', 's');
+            window.__log('🎩 魔术师就位', 's');
+        });
     });
 
     S.phase = 'INTRO';
@@ -327,9 +414,32 @@ export function updateLaserLevel(dt) {
 
     case 'INTRO':
         S.timer += dt;
-        if (S.magician) {
-            S.magician.position.y = cfg.magicianY + 0.3 * Math.sin(S.elapsed * 1.5);
-            S.magician.rotation.y += dt * 0.3;
+        // ── 施法动画驱动魔术师和魔术棒 ──
+        if (S.magician && S.animData) {
+            const magTrack = S.animData.magician;
+            const wandTrack = S.animData.wand;
+            // 采样时间（循环到最后停留）
+            const t = Math.min(S.timer, S.animDuration);
+            const mag = _lerpTrack(magTrack, t);
+            const wand = _lerpTrack(wandTrack, t);
+            // 魔术师：动画位置在 y≈1.2, z=-3，映射到场景 Y=cfg.magicianY, Z=0
+            const Y_OFFSET = cfg.magicianY - 1.2;
+            const Z_OFFSET = 3; // z=-3 → z=0
+            S.magician.position.set(mag.pos[0], mag.pos[1] + Y_OFFSET, mag.pos[2] + Z_OFFSET);
+            S.magician.quaternion.set(mag.rot[0], mag.rot[1], mag.rot[2], mag.rot[3]);
+            S.magician.scale.setScalar(mag.scl * cfg.magicianScale / 1.25); // 动画 scale=1.25，映射到配置 scale
+            // 魔术棒（相对魔术师的局部偏移）
+            if (S.magicianWand) {
+                S.magicianWand.position.set(wand.pos[0], wand.pos[1], wand.pos[2]);
+                S.magicianWand.quaternion.set(wand.rot[0], wand.rot[1], wand.rot[2], wand.rot[3]);
+                S.magicianWand.scale.setScalar(wand.scl * cfg.magicianScale / 1.25);
+                // 发光驱动：用 emissive 强度驱动材质 emissiveIntensity
+                if (S.magicianWandMat) {
+                    const emTrack = wandTrack.emissive;
+                    const em = _interpEmissive(emTrack, t);
+                    S.magicianWandMat.emissiveIntensity = em * 2; // 映射到 0-1 范围
+                }
+            }
         }
         if (S.timer >= cfg.magicianDur) {
             spawnLaserBalloons();
