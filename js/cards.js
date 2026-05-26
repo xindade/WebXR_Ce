@@ -250,6 +250,12 @@ export function updateChoiceCards(dt) {
         if (hits.length > 0) {
             hitCardIndex = choiceCardGroup.children.indexOf(hits[0].object);
         }
+        // 计算射线在 z=-3 平面的命中点（调试用）
+        if (Math.abs(rayDir.z) > 0.001) {
+            const t = (-3 - rayOrigin.z) / rayDir.z;
+            STATE._rayHitX = rayOrigin.x + t * rayDir.x;
+            STATE._rayHitY = rayOrigin.y + t * rayDir.y;
+        }
     }
     STATE.highlightedCardIndex = hitCardIndex;
 

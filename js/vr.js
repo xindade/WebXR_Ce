@@ -454,7 +454,9 @@ export function updateDebugPanel() {
         `🎯 射速  ${STATE.fireRate.toFixed(1)}x`,
         `🔫 多重  ${multiPct}`,
         `💥 范围  ${radiusStr}`,
-        `🏆 得分  ${STATE.playerStats.score}`
+        `🏆 得分  ${STATE.playerStats.score}`,
+        `📍卡@z=-3: ${(STATE.choiceCardBase?.pos?.x??0).toFixed(1)}`,
+        `📐射线: (${(STATE._rayHitX??0).toFixed(1)},${(STATE._rayHitY??0).toFixed(1)})`,
     ].join('\n');
     drawDebugPanel(info);
 }
@@ -520,7 +522,9 @@ export function updateLeftDebugPanel() {
     const info = [
         `🚢 船血  ${STATE.shipHp}/${SHIP_MAX_HP}`,
         `💰 金币  ${STATE.playerStats.gold}`,
-        buddhaLine
+        buddhaLine,
+        // 射线命中点（调试用）
+        `📍 z=-3: (${(STATE._rayHitX??0).toFixed(1)}, ${(STATE._rayHitY??0).toFixed(1)})`,
     ].join('\n');
     drawLeftDebugPanel(info);
 }
