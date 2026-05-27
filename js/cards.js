@@ -4,7 +4,7 @@ import {
     CHOICE_CARD_DISTANCE, CHOICE_CARD_WIDTH, CHOICE_CARD_HEIGHT, CHOICE_REFRESH_HEIGHT,
     CHOICE_CARD_SPACING, CHOICE_REFRESH_OFFSET_Y, CHOICE_CARD_Y_OFFSET,
     CHOICE_HIGHLIGHT_PULL, CHOICE_HIGHLIGHT_SCALE, CHOICE_HIGHLIGHT_LERP,
-    RAY_PITCH_ANGLE, RAY_CAST_DISTANCE, SHIP_MAX_HP
+    SHIP_MAX_HP
 } from './core.js';
 
 // ===================== 抽卡系统（稀有度版） =====================
@@ -181,7 +181,7 @@ export function spawnChoiceCards(forceLegendary, levelType) {
         choiceCardGroup.remove(child);
     }
 
-    // 动态计算：卡片居中于左手柄射线在 z=-3 平面的命中点
+    // 动态计算：卡片居中于左手柄位置前方 z=-2 平面
     let cardCenterX = 0;
     if (STATE.leftController) {
         const ctrlPos = new THREE.Vector3();
@@ -190,12 +190,12 @@ export function spawnChoiceCards(forceLegendary, levelType) {
         const ptQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(8 * Math.PI / 180, 0, 0));
         const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(ctrlQ.clone().multiply(ptQ));
         if (Math.abs(fwd.z) > 0.001) {
-            const t = (-3 - ctrlPos.z) / fwd.z;
+            const t = (-2 - ctrlPos.z) / fwd.z;
             cardCenterX = ctrlPos.x + t * fwd.x;
         }
     }
     STATE.choiceCardBase = {
-        pos: new THREE.Vector3(cardCenterX, 2, -3),
+        pos: new THREE.Vector3(cardCenterX, 2, -2),
         forward: new THREE.Vector3(0, 0, 1),  // 正面朝 +Z
         right: new THREE.Vector3(1, 0, 0),
     };
@@ -238,36 +238,27 @@ function _repositionCard(card, base, camY) {
     card.position.set(worldX, camY + o.offsetY, worldZ);
 }
 
-const _raycaster = new THREE.Raycaster();
+const TOUCH_DISTANCE = 0.2;  // 手柄触碰判定距离（米）
 
 export function updateChoiceCards(dt) {
     if (!STATE.choiceCardsActive || choiceCardGroup.children.length === 0) return;
-    // 使用固定锚点（出生点），不随头显旋转
     const base = STATE.choiceCardBase;
     if (!base) return;
-    // 不更新 base.pos/forward/right — 卡位固定
     const cardY = base.pos.y;  // 固定 y=2
 
-    // ---- 射线检测：左手球指向哪张卡片 ----
+    // ---- 手柄触碰检测：手柄位置与卡片距离 ----
     let hitCardIndex = -1;
-    if (STATE.leftRaySphere && STATE.leftController) {
-        const rayOrigin = new THREE.Vector3();
-        STATE.leftRaySphere.getWorldPosition(rayOrigin);
-        const ctrlQuat = STATE.leftController.getWorldQuaternion(new THREE.Quaternion());
-        // 卡片射线用控制器正前方方向（不加俯仰角偏移，自然指向）
-        const rayDir = new THREE.Vector3(0, 0, -1).applyQuaternion(ctrlQuat);
-        _raycaster.set(rayOrigin, rayDir.normalize());
-        _raycaster.far = RAY_CAST_DISTANCE;
-        const hits = _raycaster.intersectObjects(choiceCardGroup.children, false);
-        if (hits.length > 0) {
-            hitCardIndex = choiceCardGroup.children.indexOf(hits[0].object);
-        }
-        // 计算射线在 z=-3 平面的命中点（调试用）
-        if (Math.abs(rayDir.z) > 0.001) {
-            const t = (-3 - rayOrigin.z) / rayDir.z;
-            STATE._rayHitX = rayOrigin.x + t * rayDir.x;
-            STATE._rayHitY = rayOrigin.y + t * rayDir.y;
-        }
+    if (STATE.leftRaySphere) {
+        const handPos = new THREE.Vector3();
+        STATE.leftRaySphere.getWorldPosition(handPos);
+        let minDist = Infinity;
+        choiceCardGroup.children.forEach((card, idx) => {
+            const d = handPos.distanceTo(card.position);
+            if (d < TOUCH_DISTANCE && d < minDist) {
+                minDist = d;
+                hitCardIndex = idx;
+            }
+        });
     }
     STATE.highlightedCardIndex = hitCardIndex;
 
@@ -275,7 +266,7 @@ export function updateChoiceCards(dt) {
     choiceCardGroup.children.forEach((card, idx) => {
         _repositionCard(card, base, cardY);
 
-        // 高亮处理：被射线指向的卡片向玩家靠近并放大（属性卡+刷新卡）
+        // 高亮处理：被触碰的卡片放大
         const isHighlighted = (idx === hitCardIndex && (card.userData.isChoiceCard || card.userData.isRefreshCard));
         const targetScale = isHighlighted ? CHOICE_HIGHLIGHT_SCALE : 1.0;
         // 平滑插值缩放
