@@ -459,9 +459,11 @@
                         } else if (selectedLevel === 6) {
                             STATE.waveNumber = 5;
                             STATE.gameMode = 'intro6';  // 第六关特殊开场
+                            STATE.buddhaPalmUnlocked = true;
                             window.__log('🔥 第六关：红蓝对决开场 wave=5', 's');
                         } else {
                             STATE.waveNumber = selectedLevel - 1;
+                            STATE.buddhaPalmUnlocked = true;
                             window.__log('关卡' + selectedLevel + ' 生效: gold=' + STATE.playerStats.gold + ' atk=' + STATE.playerStats.atk + ' wave=' + STATE.waveNumber, 's');
                         }
                     }

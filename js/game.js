@@ -736,6 +736,10 @@ export function updateCooldowns(dt) {
             }
         }
     }
+    // 选关跳波次时，神掌模型可能延迟加载 → 每帧重试解锁
+    if (STATE.waveNumber >= 1 && STATE.buddhaPalmModel && !STATE.buddhaPalmReady) {
+        attachBuddhaPalmToLeft();
+    }
 }
 
 export function checkVRSkySwitch() {
