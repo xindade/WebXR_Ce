@@ -450,6 +450,7 @@ export function checkBulletBalloonCollisions() {
 }
 
 export function checkAllBalloonsDestroyed() {
+    if (STATE.gameMode !== 'shooting') return;  // intro6/laser 模式不放卡
     const activeBalloons = balloons.filter(b => b.userData.active);
     if (activeBalloons.length === 0 && STATE.waveSpawnRemaining <= 0 && !STATE.choiceCardsActive) {
         // 触发云朵转场
