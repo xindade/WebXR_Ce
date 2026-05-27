@@ -181,9 +181,21 @@ export function spawnChoiceCards(forceLegendary, levelType) {
         choiceCardGroup.remove(child);
     }
 
-    // 固定世界坐标基准：(0, 2, -3) 为中心，正面朝向 +Z
+    // 动态计算：卡片居中于左手柄射线在 z=-3 平面的命中点
+    let cardCenterX = 0;
+    if (STATE.leftController) {
+        const ctrlPos = new THREE.Vector3();
+        STATE.leftController.getWorldPosition(ctrlPos);
+        const ctrlQ = STATE.leftController.getWorldQuaternion(new THREE.Quaternion());
+        const ptQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(8 * Math.PI / 180, 0, 0));
+        const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(ctrlQ.clone().multiply(ptQ));
+        if (Math.abs(fwd.z) > 0.001) {
+            const t = (-3 - ctrlPos.z) / fwd.z;
+            cardCenterX = ctrlPos.x + t * fwd.x;
+        }
+    }
     STATE.choiceCardBase = {
-        pos: new THREE.Vector3(0, 2, -3),
+        pos: new THREE.Vector3(cardCenterX, 2, -3),
         forward: new THREE.Vector3(0, 0, 1),  // 正面朝 +Z
         right: new THREE.Vector3(1, 0, 0),
     };
