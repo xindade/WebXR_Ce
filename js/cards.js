@@ -181,26 +181,14 @@ export function spawnChoiceCards(forceLegendary, levelType) {
         choiceCardGroup.remove(child);
     }
 
-    // 动态计算：卡片居中于左手柄位置前方 z=-2 平面
-    let cardCenterX = 0;
-    if (STATE.leftController) {
-        const ctrlPos = new THREE.Vector3();
-        STATE.leftController.getWorldPosition(ctrlPos);
-        const ctrlQ = STATE.leftController.getWorldQuaternion(new THREE.Quaternion());
-        const ptQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(8 * Math.PI / 180, 0, 0));
-        const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(ctrlQ.clone().multiply(ptQ));
-        if (Math.abs(fwd.z) > 0.001) {
-            const t = (-2 - ctrlPos.z) / fwd.z;
-            cardCenterX = ctrlPos.x + t * fwd.x;
-        }
-    }
+    // 固定世界坐标：(0, 2, -2)，正面朝 +Z
     STATE.choiceCardBase = {
-        pos: new THREE.Vector3(cardCenterX, 2, -2),
-        forward: new THREE.Vector3(0, 0, 1),  // 正面朝 +Z
+        pos: new THREE.Vector3(0, 2, -2),
+        forward: new THREE.Vector3(0, 0, 1),
         right: new THREE.Vector3(1, 0, 0),
     };
     const base = STATE.choiceCardBase;
-    const cardY = base.pos.y;  // 固定高度 y=2
+    const cardY = base.pos.y;
 
     // 3张属性卡
     const choices = generateRandomChoices(forceLegendary, levelType);
@@ -229,7 +217,7 @@ export function spawnChoiceCards(forceLegendary, levelType) {
     }, 60000);  // 调试用，正式改为15000
 }
 
-// 卡片直接挂在 scene 下，card.position 即世界坐标
+// 卡片固定在场景 world 坐标
 function _repositionCard(card, base, camY) {
     const o = card.userData.cardOffset;
     if (!o) return;
@@ -253,7 +241,9 @@ export function updateChoiceCards(dt) {
         STATE.leftRaySphere.getWorldPosition(handPos);
         let minDist = Infinity;
         choiceCardGroup.children.forEach((card, idx) => {
-            const d = handPos.distanceTo(card.position);
+            const cardWorld = new THREE.Vector3();
+            card.getWorldPosition(cardWorld);
+            const d = handPos.distanceTo(cardWorld);
             if (d < TOUCH_DISTANCE && d < minDist) {
                 minDist = d;
                 hitCardIndex = idx;
