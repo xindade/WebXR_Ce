@@ -35,7 +35,7 @@ function pickRarityByWeight(rarities) {
 // 关卡类型判定
 export function getLevelType(waveNumber) {
     if (waveNumber === 18) return 'final';   // 通关
-    if (waveNumber === 6 || waveNumber === 12) return 'boss';
+    if (waveNumber === 5 || waveNumber === 11) return 'boss';
     if (waveNumber === 2) return 'mech';     // 激光关
     return 'normal';
 }
