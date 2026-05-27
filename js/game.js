@@ -766,5 +766,6 @@ export const GameAPI = {
     spawnChoiceCards, clearChoiceCards,
     updateBuddhaPalm, attachBuddhaPalmToLeft, resetBuddhaPalm,
     initTransitionClouds, updateTransitionClouds, startCloudTransition,
+    createKnightBalloon,
     balloons, bullets
 };

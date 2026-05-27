@@ -457,10 +457,10 @@
                             STATE.gameMode = 'laser';
                             window.__log('🎆 第三关：激光关卡启动 wave=2', 's');
                         } else if (selectedLevel === 6) {
-                            STATE.waveNumber = 4;
-                            STATE.gameMode = 'intro6';  // 红蓝对决 → Boss wave=5
+                            STATE.waveNumber = 5;
+                            STATE.gameMode = 'shooting';
                             STATE.buddhaPalmUnlocked = true;
-                            window.__log('🔥 第六关：红蓝对决开场→Boss wave=5', 's');
+                            window.__log('👑 第六关：Boss关 wave=5', 's');
                         } else {
                             STATE.waveNumber = selectedLevel - 1;
                             STATE.buddhaPalmUnlocked = true;
@@ -474,7 +474,14 @@
                         startIntro6();
                     } else {
                         createShootingGrid();
-                        game.spawnBalloons();
+                        if (STATE.waveNumber === 5 || STATE.waveNumber === 11) {
+                            // Boss关直接生成2个骑士
+                            game.createKnightBalloon(-1.5, 2, -4);
+                            game.createKnightBalloon(1.5, 2, -4);
+                            window.__log('👑 Boss关：2个骑士气球', 's');
+                        } else {
+                            game.spawnBalloons();
+                        }
                         window.__log('游戏开始 / 气球生成', 's');
                     }
                 }
