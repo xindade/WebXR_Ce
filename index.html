@@ -108,7 +108,7 @@
         /* ===== 日志面板 ===== */
         #log-panel {
             position: fixed; left: 0; top: 0; width: 42vw; height: 100vh;
-            z-index: 50; pointer-events: none;
+            z-index: 50; pointer-events: auto;
             background: rgba(0,0,0,0.88);
             color: #00ff88; font: 11px/1.4 'Consolas', 'Courier New', monospace;
             padding: 10px 12px; overflow-y: auto;
@@ -393,6 +393,25 @@
                         game.checkVRSkySwitch();
                     }
                     vr.updateGunRecoil();
+                    // 左手摇杆 Y 轴滚动日志面板
+                    if (renderer.xr.isPresenting) {
+                        try {
+                            const gp = navigator.getGamepads();
+                            for (var gi = 0; gi < gp.length; gi++) {
+                                var g = gp[gi];
+                                if (g && g.axes) {
+                                    // axes[1] = 左手摇杆 Y 轴 (PICO 默认左手指向)
+                                    var stickY = g.axes[1];
+                                    if (Math.abs(stickY) > 0.1) {
+                                        var panel = document.getElementById('log-panel');
+                                        if (panel) {
+                                            panel.scrollTop += stickY * -8;  // 反向+倍率
+                                        }
+                                    }
+                                }
+                            }
+                        } catch(e) {}
+                    }
                     game.updateTransitionClouds(dt);
                     game.updateDebris(dt);
                     game.updateParticles(dt);
@@ -439,6 +458,8 @@
         }
 
         renderer.xr.addEventListener('sessionstart', () => {
+            window.__logPaused = false;
+            window.__vrActive = true;
             window.__log('sessionstart 事件触发', 's');
             setShadow(false);
             setTimeout(() => vr.attachAK48(), 100);
@@ -492,7 +513,9 @@
         });
 
         renderer.xr.addEventListener('sessionend', () => {
-            window.__log('sessionend 事件触发', 'w');
+            window.__vrActive = false;
+            window.__logPaused = true;
+            window.__log('sessionend 事件触发 - 日志已暂停', 's');
             setShadow(true);
             enterVRBtn.disabled = false;
             enterVRLeftHandBtn.disabled = false;
