@@ -1,6 +1,6 @@
 import * as THREE from '../three.module.js';
 import { scene, dolly, STATE, BOUND_X, BOUND_Z, applySkyTarget,
-         clouds, balloonGroup, bulletGroup, particleGroup, debrisGroup, choiceCardGroup,
+         clouds, balloonGroup, bulletGroup, choiceCardGroup,
          sunSprite, moonSprite, starLayers } from './core.js';
 import { GLTFLoader } from '../jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from '../jsm/loaders/DRACOLoader.js';
@@ -71,7 +71,7 @@ const _hiddenGroups = [];
 function hideShootingScene() {
     _hiddenGroups.length = 0;
     const hide = (obj) => { if (obj && obj.visible !== undefined) { _hiddenGroups.push({ obj, visible: obj.visible }); obj.visible = false; } };
-    hide(balloonGroup); hide(bulletGroup); hide(particleGroup); hide(debrisGroup);
+    hide(balloonGroup); hide(bulletGroup);
     clouds.forEach(c => hide(c));
     if (STATE.shipModel) hide(STATE.shipModel);
     hide(choiceCardGroup);
@@ -801,8 +801,6 @@ function onLaserCleared() {
     // 确保所有关键对象恢复可见
     balloonGroup.visible = true;
     bulletGroup.visible = true;
-    particleGroup.visible = true;
-    debrisGroup.visible = true;
     if (STATE.shipModel) STATE.shipModel.visible = true;
     showShootingScene();
     cleanupLaserLevel();
@@ -819,8 +817,6 @@ function onLaserFailed() {
     // 确保所有关键对象恢复可见
     balloonGroup.visible = true;
     bulletGroup.visible = true;
-    particleGroup.visible = true;
-    debrisGroup.visible = true;
     if (STATE.shipModel) STATE.shipModel.visible = true;
     showShootingScene();
     cleanupLaserLevel();

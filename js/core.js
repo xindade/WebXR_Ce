@@ -117,11 +117,6 @@ export const SHIP_SCALE = 18.0;
 export const SHIP_POS = [0, -3.5, 0.05];
 export const SHIP_ROT = [0, -1.57, 0];
 
-export const DEBRIS_COUNT = 30;
-export const DEBRIS_LIFE = 0.8;
-export const PARTICLE_COUNT = 50;
-export const PARTICLE_LIFE = 1.0;
-
 export const BUDDHA_COOLDOWN = 8;            // 神掌冷却时间（s）
 export const BUDDHA_HAND_SCALE = 0.2;         // 装备在左手柄的缩放
 export const BUDDHA_HAND_POS = [0, -0.08, 0.03]; // 装备在左手柄的位置
@@ -129,12 +124,10 @@ export const BUDDHA_HAND_ROT_X = -Math.PI / 2;  // 装备在左手柄X轴旋转�
 export const BUDDHA_KILL_RADIUS = 50;         // 落地杀伤半径（m，直接拉满）
 export const BUDDHA_DAMAGE = 1000;            // 落地伤害
 export const BUDDHA_FALL_DURATION = 0.5;      // 下落动画时长（s）
-export const BUDDHA_PARTICLE_COUNT = 20;      // 落地金色粒子数
 export const BUDDHA_FALL_START_SCALE = 2.0;   // 下落起始缩放
 export const BUDDHA_FALL_END_SCALE = 20.0;    // 下落结束缩放
 export const BUDDHA_FALL_HEIGHT = 20;         // 下落起始高度（相对玩家上方，m）
 export const BUDDHA_FALL_FORWARD = 3;         // 下落点在瞄准方向前方距离
-export const BUDDHA_IMPACT_CLEANUP = 0.3;     // 落地特效清理延迟（s）
 
 export const BOUND_X = 2;
 export const BOUND_Z = 4;

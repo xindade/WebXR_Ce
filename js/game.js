@@ -19,10 +19,9 @@ import {
     CHOICE_CARD_SPACING, CHOICE_REFRESH_OFFSET_Y, CHOICE_CARD_Y_OFFSET,
     CHOICE_HIGHLIGHT_PULL, CHOICE_HIGHLIGHT_SCALE, CHOICE_HIGHLIGHT_LERP,
     RAY_PITCH_ANGLE, RAY_CAST_DISTANCE,
-    DEBRIS_COUNT, DEBRIS_LIFE, PARTICLE_COUNT, PARTICLE_LIFE,
-    BUDDHA_COOLDOWN, BUDDHA_KILL_RADIUS, BUDDHA_DAMAGE, BUDDHA_FALL_DURATION, BUDDHA_PARTICLE_COUNT,
+    BUDDHA_COOLDOWN, BUDDHA_KILL_RADIUS, BUDDHA_DAMAGE, BUDDHA_FALL_DURATION,
     BUDDHA_HAND_SCALE, BUDDHA_HAND_POS, BUDDHA_HAND_ROT_X,
-    BUDDHA_FALL_START_SCALE, BUDDHA_FALL_END_SCALE, BUDDHA_FALL_HEIGHT, BUDDHA_FALL_FORWARD, BUDDHA_IMPACT_CLEANUP,
+    BUDDHA_FALL_START_SCALE, BUDDHA_FALL_END_SCALE, BUDDHA_FALL_HEIGHT, BUDDHA_FALL_FORWARD,
     BOUND_X, BOUND_Z, balloonTex, buddhaPalmGroup,
     applySkyTarget, skyCycle, skyBrightness,
     createCloud, clouds,
@@ -359,8 +358,8 @@ export function updateBalloons(dt) {
             STATE.shipHp -= BALLOON_DAMAGE;
             STATE.shipHitFlash = 0.3;
             const debrisColor = b.userData.isKnight ? 0x888888 : 0xff4444;
-            spawnDebris(b.position.clone(), debrisColor, b.userData.isKnight ? 12 : 8);
-            spawnParticles(b.position.clone(), 0xff4444, 15);
+
+
             playPop();
             console.log(`💥 气球撞船！船HP: ${STATE.shipHp}/${SHIP_MAX_HP}`);
             checkAllBalloonsDestroyed();
@@ -406,8 +405,7 @@ export function checkBulletBalloonCollisions() {
                         STATE.playerStats.gold += BALLOON_SCORE;
                     }
                     const debrisColor = balloon.userData.isKnight ? 0x888888 : (balloon.material.color ? balloon.material.color.getHex() : 0xff4444);
-                    spawnDebris(balloon.position.clone(), debrisColor, balloon.userData.isKnight ? 12 : 8);
-                    spawnParticles(balloon.position.clone(), debrisColor, 20);
+
                     playPop();
                 }
                 bullet.userData.active = false;
@@ -857,99 +855,6 @@ export function restartLevel() {
     }, 500);
 }
 
-// ===================== 特效系统 =====================
-// 粒子
-const particlePool = [];
-export function initParticlePool() {
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
-        const geom = new THREE.SphereGeometry(0.01, 4, 4);
-        const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1.0 });
-        const mesh = new THREE.Mesh(geom, mat);
-        mesh.userData = { active: false, vel: new THREE.Vector3(), life: 0 };
-        mesh.visible = false;
-        particleGroup.add(mesh);
-        particlePool.push(mesh);
-    }
-    if (window.__log) window.__log('粒子池初始化 (' + PARTICLE_COUNT + ' 个)', 's');
-}
-initParticlePool();
-
-export function spawnParticles(position, color, count = 30) {
-    for (let i = 0; i < count; i++) {
-        const p = particlePool.find(p => !p.userData.active);
-        if (!p) break;
-        p.position.copy(position);
-        p.userData.active = true;
-        p.userData.life = PARTICLE_LIFE;
-        p.userData.vel.set((Math.random()-0.5)*2, (Math.random()-0.5)*2, (Math.random()-0.5)*2);
-        p.material.color.setHex(color);
-        p.material.opacity = 1.0;
-        p.visible = true;
-    }
-}
-
-export function updateParticles(dt) {
-    for (let i = 0; i < particlePool.length; i++) {
-        const p = particlePool[i];
-        if (!p.userData.active) continue;
-        p.position.addScaledVector(p.userData.vel, dt);
-        p.userData.vel.multiplyScalar(0.98);
-        p.userData.life -= dt;
-        p.material.opacity = Math.max(0, p.userData.life / PARTICLE_LIFE);
-        if (p.userData.life <= 0) { p.userData.active = false; p.visible = false; }
-    }
-}
-
-// 碎片
-const debrisPool = [];
-export function initDebrisPool() {
-    const geom = new THREE.TetrahedronGeometry(0.04, 0);
-    for (let i = 0; i < DEBRIS_COUNT; i++) {
-        const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1.0, side: THREE.DoubleSide });
-        const mesh = new THREE.Mesh(geom, mat);
-        mesh.userData = { active: false, vel: new THREE.Vector3(), rotVel: new THREE.Vector3(), life: 0 };
-        mesh.visible = false;
-        debrisGroup.add(mesh);
-        debrisPool.push(mesh);
-    }
-    if (window.__log) window.__log('碎片池初始化 (' + DEBRIS_COUNT + ' 个)', 's');
-}
-initDebrisPool();
-
-export function spawnDebris(position, color, count = 8) {
-    for (let i = 0; i < count; i++) {
-        const d = debrisPool.find(d => !d.userData.active);
-        if (!d) break;
-        d.position.copy(position);
-        const angle = Math.random() * Math.PI * 2;
-        const speed = 1.5 + Math.random() * 2.5;
-        const upBias = Math.random() * 1.5;
-        d.userData.vel.set(Math.cos(angle)*speed, upBias+Math.random()*2, Math.sin(angle)*speed);
-        d.userData.rotVel.set((Math.random()-0.5)*10, (Math.random()-0.5)*10, (Math.random()-0.5)*10);
-        d.userData.active = true;
-        d.userData.life = DEBRIS_LIFE;
-        d.material.color.setHex(color);
-        d.material.opacity = 1.0;
-        d.visible = true;
-    }
-}
-
-export function updateDebris(dt) {
-    for (let i = 0; i < debrisPool.length; i++) {
-        const d = debrisPool[i];
-        if (!d.userData.active) continue;
-        d.position.addScaledVector(d.userData.vel, dt);
-        d.userData.vel.y -= 4.0 * dt;
-        d.userData.vel.multiplyScalar(0.98);
-        d.rotation.x += d.userData.rotVel.x * dt;
-        d.rotation.y += d.userData.rotVel.y * dt;
-        d.rotation.z += d.userData.rotVel.z * dt;
-        d.userData.life -= dt;
-        d.material.opacity = Math.max(0, d.userData.life / DEBRIS_LIFE);
-        if (d.userData.life <= 0 || d.position.y < -2) { d.userData.active = false; d.visible = false; }
-    }
-}
-
 // ===================== 刷新冷却管理 =====================
 export function updateCooldowns(dt) {
     const prevCd = STATE.choiceRefreshCooldown;
@@ -1083,8 +988,7 @@ export function updateBuddhaPalm(dt) {
                                 STATE.playerStats.gold += BALLOON_SCORE;
                             }
                             const debrisColor = b.userData.isKnight ? 0x888888 : (b.material.color ? b.material.color.getHex() : 0xff4444);
-                            spawnDebris(b.position.clone(), debrisColor, b.userData.isKnight ? 12 : 8);
-                            spawnParticles(b.position.clone(), debrisColor, 20);
+
                             playPop();
                             killed++;
                         }
@@ -1092,11 +996,14 @@ export function updateBuddhaPalm(dt) {
                 }
                 window.__log('🖐️ 如来神掌命中！击杀 ' + killed + ' 个气球', 's');
                 // 金色粒子爆炸
-                spawnParticles(palmPos, 0xffd700, BUDDHA_PARTICLE_COUNT);
+
             }
         } else if (palmData.phase === 'impact') {
-            // 延迟后清理
-            if (palmData.timer > BUDDHA_IMPACT_CLEANUP) {
+            // 落地后 1 秒内缩放从 FALL_END_SCALE → 1.0，然后消失
+            const t = Math.min(palmData.timer / 1.0, 1);
+            const s = BUDDHA_FALL_END_SCALE + (1.0 - BUDDHA_FALL_END_SCALE) * t * t * (3 - 2 * t);
+            palmData.mesh.scale.setScalar(s);
+            if (t >= 1) {
                 palmData.mesh.traverse(c => {
                     if (c.geometry) c.geometry.dispose();
                     if (c.material) {
@@ -1174,7 +1081,7 @@ export const GameAPI = {
     updateCooldowns, updateBullets, updateBalloons, updateWaveSpawning,
     updateChoiceCards,
     checkBulletBalloonCollisions, checkLeftHandChoiceCardCollision,
-    updateDebris, updateParticles, checkVRSkySwitch,
+    checkVRSkySwitch,
     spawnBalloons, restartLevel, gameOver,
     updateBuddhaPalm, attachBuddhaPalmToLeft, resetBuddhaPalm,
     initTransitionClouds, updateTransitionClouds, startCloudTransition,
