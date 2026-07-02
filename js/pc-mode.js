@@ -179,6 +179,9 @@ export function updatePCMode(dt) {
     camera.rotation.y = 0;
     camera.rotation.z = 0;
 
+    // 强制更新世界矩阵（shootBullet 依赖 controller.matrixWorld）
+    dolly.updateMatrixWorld(true);
+
     // 2. 键盘移动
     let mx = 0, mz = 0;
     if (PC.keys.has('KeyW')) mz -= 1;
@@ -205,8 +208,13 @@ export function updatePCMode(dt) {
         const cooldown = SHOOT_COOLDOWN / Math.max(0.1, STATE.fireRate);
         if (now - PC.lastShotTime > cooldown) {
             try {
+                // 确保矩阵最新
+                STATE.rightController.updateMatrixWorld(true);
                 shootBullet(STATE.rightController);
                 PC.lastShotTime = now;
+                if (window.__log && (now - (PC._lastLogTime||0) > 500)) {
+                    PC._lastLogTime = now;
+                }
             } catch (e) {
                 if (window.__log) window.__log('PC 射击错误: ' + e.message, 'e');
             }

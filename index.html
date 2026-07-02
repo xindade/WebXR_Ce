@@ -255,10 +255,17 @@
 
         // PC 键鼠模式按钮
         const enterPCBtn = document.getElementById('enter-pc-btn');
+        const logPanelEl = document.getElementById('log-panel');
         enterPCBtn.onclick = () => {
             vrEntryEl.style.display = 'none';
             vrHintsEl.style.display = 'none';
+            // PC 模式隐藏日志面板（调试时可改这里）
+            logPanelEl.style.display = 'none';
             pc.startPCGame(selectedLevel);
+            // 挂载 AK48 枪模型
+            setTimeout(() => {
+                try { vr.attachAK48(); } catch(e) { window.__log('PC模式挂枪失败: ' + e.message, 'w'); }
+            }, 100);
             // 初始化游戏内容
             setTimeout(() => {
                 if (STATE.gameMode === 'laser') {
@@ -290,6 +297,8 @@
             // 清除气球
             game.balloons.forEach(b => { if (b && b.parent) b.parent.remove(b); });
             game.balloons.length = 0;
+            // 恢复日志面板
+            logPanelEl.style.display = 'block';
             // 显示主菜单
             vrEntryEl.style.display = 'block';
             vrHintsEl.style.display = 'flex';
