@@ -1,10 +1,9 @@
 // ===================== PC 键鼠操作模式 =====================
 // 用于桌面调试：WASD 移动、鼠标视角、左键射击
-// 与 vr.js 的接口兼容：复用 shootBullet / handleMovement / handleShooting
+// 复用 vr.js 的 handleShooting + updateGunRecoil 保证与 VR 一致
 import * as THREE from '../three.module.js';
-import { scene, dolly, camera, STATE, BOUND_X, BOUND_Z, MOVE_SPEED, skyCycle, applySkyTarget } from './core.js';
-import { shootBullet } from './game.js';
-import { attachAK48 } from './vr.js';
+import { scene, dolly, camera, STATE, BOUND_X, BOUND_Z, MOVE_SPEED, applySkyTarget } from './core.js';
+import { attachAK48, handleShooting, updateGunRecoil } from './vr.js';
 
 // PC 模式状态
 const PC = {
@@ -50,16 +49,17 @@ function ensureAK48Attached() {
     try {
         attachAK48();
         // PC 模式下重新校正枪的局部位置和朝向
-        // ⚠️ 注意：vr.js 的 updateGunRecoil() 每帧会用 ak48BasePos/BaseRot 覆盖 position/rotation
-        // 所以必须同时修改 ak48BasePos/BaseRot，否则会被覆盖回去
+        // ⚠️ 必须同时修改 ak48BasePos/BaseRot，否则 updateGunRecoil 每帧会覆盖回去
         if (STATE.ak48Mesh) {
-            const basePos = new THREE.Vector3(0, -0.05, -0.3);
-            const baseRot = new THREE.Euler(0, 0, 0);
+            // VR 模式下 rotation.x=-20 弧度, rotation.y=π/2 是给 XR 手柄 pose 用的
+            // PC 模式下虚拟 grip 没有自身旋转，直接保留 rotation.y=π/2 让枪管朝 -Z 即可
+            const basePos = new THREE.Vector3(0, -0.1, 0.01);  // 保留 VR 默认位置
+            const baseRot = new THREE.Euler(0, Math.PI / 2, 0); // 只保留 Y 旋转，去掉 X 旋转
             STATE.ak48Mesh.position.copy(basePos);
             STATE.ak48Mesh.rotation.copy(baseRot);
             STATE.ak48BasePos = basePos;
             STATE.ak48BaseRot = baseRot;
-            if (window.__log) window.__log('PC AK48 位置已重置: pos=' + basePos.toArray().map(v=>v.toFixed(2)).join(',') + ' (vr.updateGunRecoil 会用此值)', 's');
+            if (window.__log) window.__log('PC AK48 已挂载 (PC 朝向: rot.y=π/2)', 's');
         }
     } catch (e) {
         if (window.__log) window.__log('PC 挂载 AK48 失败: ' + e.message, 'e');
@@ -117,6 +117,8 @@ export function exitPCMode() {
     if (!PC.active) return;
     PC.active = false;
     STATE.pcMode = false;
+    STATE.rightTrigger = false;  // 清除射击状态
+    PC.fireHeld = false;
 
     document.removeEventListener('keydown', onKeyDown);
     document.removeEventListener('keyup', onKeyUp);
@@ -160,13 +162,20 @@ function onKeyUp(e) {
 
 function onMouseDown(e) {
     if (!PC.active) return;
-    if (e.button === 0) PC.fireHeld = true;
+    if (e.button === 0) {
+        PC.fireHeld = true;
+        STATE.rightTrigger = true;  // 让 vr.handleShooting 检测到射击
+        if (window.__log) window.__log('🖱️ 鼠标左键按下 fireHeld=true', 'i');
+    }
     // 第一次点击如果没锁定，先锁定
     if (!PC.mouseLocked) requestPointerLock();
 }
 
 function onMouseUp(e) {
-    if (e.button === 0) PC.fireHeld = false;
+    if (e.button === 0) {
+        PC.fireHeld = false;
+        STATE.rightTrigger = false;
+    }
 }
 
 function onMouseMove(e) {
@@ -236,28 +245,19 @@ export function updatePCMode(dt) {
         dolly.position.z = Math.max(-BOUND_Z, Math.min(BOUND_Z, dolly.position.z + dz));
     }
 
-    // 3. 射击：左键按下 + 冷却
-    if (PC.fireHeld && STATE.rightController) {
-        const now = performance.now();
-        const SHOOT_COOLDOWN = 150;
-        const cooldown = SHOOT_COOLDOWN / Math.max(0.1, STATE.fireRate);
-        if (now - PC.lastShotTime > cooldown) {
-            try {
-                // 确保矩阵最新
-                STATE.rightController.updateMatrixWorld(true);
-                shootBullet(STATE.rightController);
-                PC.lastShotTime = now;
-                if (window.__log && (now - (PC._lastLogTime||0) > 500)) {
-                    PC._lastLogTime = now;
-                }
-            } catch (e) {
-                if (window.__log) window.__log('PC 射击错误: ' + e.message, 'e');
-            }
-        }
+    // 3. 射击：复用 vr.handleShooting（与 VR 完全一致的射击逻辑）
+    try {
+        handleShooting();
+    } catch (e) {
+        if (window.__log) window.__log('PC handleShooting 错误: ' + e.message, 'e');
     }
 
-    // 4. 调用 sky switch 检查（让数字键在游戏内也能切）
-    // 这里直接由 keydown 处理，不需要再调用
+    // 4. 后坐力更新（与 VR 一致，避免 ak48Mesh 位置不同步）
+    try {
+        updateGunRecoil();
+    } catch (e) {
+        if (window.__log) window.__log('PC updateGunRecoil 错误: ' + e.message, 'e');
+    }
 }
 
 // ===================== 入口（启动游戏并选关）=====================
