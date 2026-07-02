@@ -1,9 +1,9 @@
 // ===================== PC 键鼠操作模式 =====================
 // 用于桌面调试：WASD 移动、鼠标视角、左键射击
-// 复用 vr.js 的 handleShooting + updateGunRecoil 保证与 VR 一致
 import * as THREE from '../three.module.js';
 import { scene, dolly, camera, STATE, BOUND_X, BOUND_Z, MOVE_SPEED, applySkyTarget } from './core.js';
-import { attachAK48, handleShooting, updateGunRecoil } from './vr.js';
+import { attachAK48, updateGunRecoil, initAudio, playShootSound } from './vr.js';
+import { shootBullet } from './game.js';
 
 // PC 模式状态
 const PC = {
@@ -164,8 +164,9 @@ function onMouseDown(e) {
     if (!PC.active) return;
     if (e.button === 0) {
         PC.fireHeld = true;
-        STATE.rightTrigger = true;  // 让 vr.handleShooting 检测到射击
-        if (window.__log) window.__log('🖱️ 鼠标左键按下 fireHeld=true', 'i');
+        if (window.__log) window.__log('🖱️ 鼠标按下: rc=' + !!STATE.rightController +
+                                       ' ak48=' + !!STATE.ak48Mesh +
+                                       ' fireRate=' + (STATE.fireRate||'undef'), 'i');
     }
     // 第一次点击如果没锁定，先锁定
     if (!PC.mouseLocked) requestPointerLock();
@@ -174,7 +175,6 @@ function onMouseDown(e) {
 function onMouseUp(e) {
     if (e.button === 0) {
         PC.fireHeld = false;
-        STATE.rightTrigger = false;
     }
 }
 
@@ -245,14 +245,32 @@ export function updatePCMode(dt) {
         dolly.position.z = Math.max(-BOUND_Z, Math.min(BOUND_Z, dolly.position.z + dz));
     }
 
-    // 3. 射击：复用 vr.handleShooting（与 VR 完全一致的射击逻辑）
-    try {
-        handleShooting();
-    } catch (e) {
-        if (window.__log) window.__log('PC handleShooting 错误: ' + e.message, 'e');
+    // 3. 射击：直接调用 shootBullet（绕过 vr.handleShooting 的 STATE 检查）
+    if (PC.fireHeld && STATE.rightController) {
+        const now = performance.now();
+        const cooldown = 150 / Math.max(0.1, STATE.fireRate || 1);
+        if (now - PC.lastShotTime > cooldown) {
+            try {
+                // 确保矩阵最新（shootBullet 依赖 controller.matrixWorld）
+                STATE.rightController.updateMatrixWorld(true);
+                initAudio();
+                playShootSound();
+                shootBullet(STATE.rightController);
+                PC.lastShotTime = now;
+                // 后坐力（与 vr.handleShooting 一致）
+                STATE.gunRecoilRot += 0.08 * Math.min(1.0, 1.0 / Math.max(0.3, STATE.fireRate || 1));
+                // 第一次射击打印成功日志
+                if (!PC._firedOnce) {
+                    PC._firedOnce = true;
+                    if (window.__log) window.__log('🔫 PC 模式首次射击成功', 's');
+                }
+            } catch (e) {
+                if (window.__log) window.__log('PC 射击错误: ' + e.message, 'e');
+            }
+        }
     }
 
-    // 4. 后坐力更新（与 VR 一致，避免 ak48Mesh 位置不同步）
+    // 4. 后坐力更新
     try {
         updateGunRecoil();
     } catch (e) {
