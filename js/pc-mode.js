@@ -48,9 +48,30 @@ function ensureAK48Attached() {
     STATE.ak48BaseRot = null;
     // 调用 vr.js 的挂载函数
     try {
-        if (window.__log) window.__log('PC 挂载 AK48 前: model=' + !!STATE.ak48Model + ' grip=' + !!STATE.rightGrip + ' attached=' + STATE.ak48Attached, 'i');
         attachAK48();
-        if (window.__log) window.__log('PC 挂载 AK48 后: attached=' + STATE.ak48Attached + ' mesh=' + !!STATE.ak48Mesh, 's');
+        // PC 模式下重新校正枪的局部位置和朝向（VR 模式下手柄 pose 会修正，PC 模式需要手动）
+        if (STATE.ak48Mesh) {
+            // 让枪管朝 -Z（相机前方），枪身在右下方
+            STATE.ak48Mesh.position.set(0, -0.05, -0.3);
+            STATE.ak48Mesh.rotation.set(0, 0, 0);  // 移除 VR 模式下的奇怪 rotation
+            STATE.ak48BasePos = STATE.ak48Mesh.position.clone();
+            STATE.ak48BaseRot = STATE.ak48Mesh.rotation.clone();
+            if (window.__log) window.__log('PC AK48 已重置位置/朝向 (0,-0.05,-0.3)', 's');
+        }
+        if (window.__log) {
+            const gun = STATE.ak48Mesh;
+            const grip = STATE.rightGrip;
+            // 更新世界矩阵
+            dolly.updateMatrixWorld(true);
+            const gunWorld = gun ? new THREE.Vector3().setFromMatrixPosition(gun.matrixWorld) : null;
+            const camPos = camera.position;
+            const camWorld = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld);
+            window.__log('PC AK48: attached=' + STATE.ak48Attached +
+                         ' grip.parent=' + (grip && grip.parent ? grip.parent.type : 'null') +
+                         ' gun.parent=' + (gun && gun.parent ? gun.parent.type : 'null') +
+                         ' gunWorld=' + (gunWorld ? gunWorld.toArray().map(v=>v.toFixed(2)).join(',') : 'null') +
+                         ' camWorld=' + camWorld.toArray().map(v=>v.toFixed(2)).join(','), 'i');
+        }
     } catch (e) {
         if (window.__log) window.__log('PC 挂载 AK48 失败: ' + e.message, 'e');
     }
