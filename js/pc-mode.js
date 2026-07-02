@@ -49,17 +49,17 @@ function ensureAK48Attached() {
     try {
         attachAK48();
         // PC 模式下重新校正枪的局部位置和朝向
-        // ⚠️ 必须同时修改 ak48BasePos/BaseRot，否则 updateGunRecoil 每帧会覆盖回去
         if (STATE.ak48Mesh) {
-            // VR 模式下 rotation.x=-20 弧度, rotation.y=π/2 是给 XR 手柄 pose 用的
-            // PC 模式下虚拟 grip 没有自身旋转，直接保留 rotation.y=π/2 让枪管朝 -Z 即可
-            const basePos = new THREE.Vector3(0, -0.1, 0.01);  // 保留 VR 默认位置
-            const baseRot = new THREE.Euler(0, Math.PI / 2, 0); // 只保留 Y 旋转，去掉 X 旋转
+            // 让枪更靠近相机正前方（更明显的位置）+ 放大 3 倍便于看清
+            const basePos = new THREE.Vector3(0, -0.15, -0.5);
+            const baseRot = new THREE.Euler(0, Math.PI / 2, 0);  // 保留 Y 旋转让枪管朝 -Z
             STATE.ak48Mesh.position.copy(basePos);
             STATE.ak48Mesh.rotation.copy(baseRot);
+            // PC 模式放大 3 倍（VR 中 0.6 是因为手柄近眼，PC 中需要更大才看得清）
+            STATE.ak48Mesh.scale.set(1.8, 1.8, 1.8);
             STATE.ak48BasePos = basePos;
             STATE.ak48BaseRot = baseRot;
-            if (window.__log) window.__log('PC AK48 已挂载 (PC 朝向: rot.y=π/2)', 's');
+            if (window.__log) window.__log('PC AK48 已挂载 (scale=1.8 pos=0,-0.15,-0.5)', 's');
         }
     } catch (e) {
         if (window.__log) window.__log('PC 挂载 AK48 失败: ' + e.message, 'e');
@@ -245,24 +245,29 @@ export function updatePCMode(dt) {
         dolly.position.z = Math.max(-BOUND_Z, Math.min(BOUND_Z, dolly.position.z + dz));
     }
 
-    // 3. 射击：直接调用 shootBullet（绕过 vr.handleShooting 的 STATE 检查）
+    // 3. 射击：直接调用 shootBullet
     if (PC.fireHeld && STATE.rightController) {
         const now = performance.now();
         const cooldown = 150 / Math.max(0.1, STATE.fireRate || 1);
         if (now - PC.lastShotTime > cooldown) {
             try {
-                // 确保矩阵最新（shootBullet 依赖 controller.matrixWorld）
+                // 确保矩阵最新
                 STATE.rightController.updateMatrixWorld(true);
                 initAudio();
                 playShootSound();
                 shootBullet(STATE.rightController);
                 PC.lastShotTime = now;
-                // 后坐力（与 vr.handleShooting 一致）
+                // 后坐力
                 STATE.gunRecoilRot += 0.08 * Math.min(1.0, 1.0 / Math.max(0.3, STATE.fireRate || 1));
-                // 第一次射击打印成功日志
+                // 第一次射击打印成功日志 + 子弹位置
                 if (!PC._firedOnce) {
                     PC._firedOnce = true;
-                    if (window.__log) window.__log('🔫 PC 模式首次射击成功', 's');
+                    // 打印 controller 世界位置和朝向
+                    const wp = new THREE.Vector3().setFromMatrixPosition(STATE.rightController.matrixWorld);
+                    const wq = STATE.rightController.getWorldQuaternion(new THREE.Quaternion());
+                    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(wq);
+                    if (window.__log) window.__log('🔫 PC 首次射击: 枪口=' + wp.toArray().map(v=>v.toFixed(2)).join(',') +
+                                                   ' 方向=' + fwd.toArray().map(v=>v.toFixed(2)).join(','), 's');
                 }
             } catch (e) {
                 if (window.__log) window.__log('PC 射击错误: ' + e.message, 'e');

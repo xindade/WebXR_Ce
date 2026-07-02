@@ -35,6 +35,9 @@ const sharedBulletGeom = new THREE.SphereGeometry(0.02, 8, 8);
 const sharedBulletMat = new THREE.MeshStandardMaterial({
     color: 0xffaa00, emissive: 0xff4400, emissiveIntensity: 0.8
 });
+// PC 模式专用：放大子弹便于桌面调试看清
+const sharedBulletGeomPC = new THREE.SphereGeometry(0.06, 12, 12);
+const sharedBulletMatPC = new THREE.MeshBasicMaterial({ color: 0xffff00 });
 const bulletPool = [];
 
 export function initBulletPool() {
@@ -64,7 +67,8 @@ function fireOneBullet(controller) {
     const origin = muzzleLocal.clone().applyMatrix4(controller.matrixWorld);
     const quat = controller.getWorldQuaternion(new THREE.Quaternion());
 
-    const bulletPitch = -30 * Math.PI / 180;
+    // PC 模式下相机水平朝前，不需要 -30° 下倾角；VR 模式下手柄略向上抬，需要 -30°
+    const bulletPitch = STATE.pcMode ? 0 : (-30 * Math.PI / 180);
     const localPitchQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(bulletPitch, 0, 0));
     const finalQuat = quat.clone().multiply(localPitchQuat);
     const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(finalQuat);
@@ -74,6 +78,14 @@ function fireOneBullet(controller) {
     bullet.userData.vel.copy(dir.normalize().multiplyScalar(BULLET_SPEED));
     bullet.userData.life = BULLET_LIFE;
     bullet.visible = true;
+    // PC 模式下用更大的子弹几何和明亮材质便于看清
+    if (STATE.pcMode) {
+        bullet.geometry = sharedBulletGeomPC;
+        bullet.material = sharedBulletMatPC;
+    } else {
+        bullet.geometry = sharedBulletGeom;
+        bullet.material = sharedBulletMat;
+    }
     bullets.push(bullet);
 }
 
