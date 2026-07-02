@@ -140,6 +140,7 @@ export const STATE = {
     gameOverState: false,
     waveNumber: 0,
     leftHandGunEnabled: false,
+    pcMode: false,
 
     shipHp: SHIP_MAX_HP,
     shipHitFlash: 0,

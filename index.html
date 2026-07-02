@@ -50,6 +50,11 @@
             box-shadow: 0 8px 30px rgba(33,150,243,0.5);
         }
         .vr-btn-alt:hover { background: linear-gradient(135deg, #42a5f5, #2196F3); }
+        .vr-btn-pc {
+            background: linear-gradient(135deg, #00897B, #00695C);
+            box-shadow: 0 8px 30px rgba(0,137,123,0.5);
+        }
+        .vr-btn-pc:hover { background: linear-gradient(135deg, #26a69a, #00897B); }
 
         #vr-hints {
             position: fixed; bottom: 130px; left: 50%; transform: translateX(-50%);
@@ -141,6 +146,7 @@
         <div id="btn-container">
             <button id="enter-vr-btn" class="vr-btn">🎈 正常开始游戏</button>
             <button id="enter-vr-left-hand" class="vr-btn vr-btn-alt">🔫 左手持枪模式</button>
+            <button id="enter-pc-btn" class="vr-btn vr-btn-pc">⌨️ PC 键鼠操作</button>
         </div>
         <div id="level-container">
             <div style="color:#fff;font-size:13px;letter-spacing:1px;margin-bottom:8px;text-align:center;opacity:0.7;">选择关卡</div>
@@ -173,6 +179,7 @@
         import { GameAPI as game } from './js/game.js';
         import { VrAPI as vr } from './js/vr.js';
         import { LaserAPI as laser } from './js/laser-level.js';
+        import { PCModeAPI as pc } from './js/pc-mode.js';
 
         // 将音频/VR模块注入游戏模块（避免循环依赖）
         game.setAudio(vr);
@@ -245,6 +252,48 @@
 
         enterVRBtn.onclick = () => enterVR(false);
         enterVRLeftHandBtn.onclick = () => enterVR(true);
+
+        // PC 键鼠模式按钮
+        const enterPCBtn = document.getElementById('enter-pc-btn');
+        enterPCBtn.onclick = () => {
+            vrEntryEl.style.display = 'none';
+            vrHintsEl.style.display = 'none';
+            pc.startPCGame(selectedLevel);
+            // 初始化游戏内容
+            setTimeout(() => {
+                if (STATE.gameMode === 'laser') {
+                    laser.startLaserLevel();
+                    laser._initialized = true;
+                } else if (STATE.waveNumber === 5 || STATE.waveNumber === 11) {
+                    game.createKnightBalloon(-1.5, 2, -4);
+                    game.createKnightBalloon(1.5, 2, -4);
+                    createShootingGrid();
+                    window.__log('👑 Boss关：2个骑士气球', 's');
+                } else {
+                    createShootingGrid();
+                    game.spawnBalloons();
+                    window.__log('PC 模式游戏开始 / 气球生成', 's');
+                }
+            }, 200);
+        };
+
+        // PC 模式退出回调
+        window.__onExitPCMode = () => {
+            // 退出后重置游戏状态
+            STATE.gameStarted = false;
+            STATE.waveNumber = 0;
+            STATE.gameOverState = false;
+            STATE.gameMode = 'shooting';
+            destroyShootingGrid();
+            laser.cleanupLaserLevel();
+            laser._initialized = false;
+            // 清除气球
+            game.balloons.forEach(b => { if (b && b.parent) b.parent.remove(b); });
+            game.balloons.length = 0;
+            // 显示主菜单
+            vrEntryEl.style.display = 'block';
+            vrHintsEl.style.display = 'flex';
+        };
 
         // 关卡选择按钮
         let selectedLevel = 0;
@@ -411,6 +460,34 @@
                                 }
                             }
                         } catch(e) {}
+                    }
+                    game.updateTransitionClouds(dt);
+                    if (!animate._frameCount) animate._frameCount = 0;
+                    animate._frameCount++;
+                    if (animate._frameCount % 5 === 0) {
+                        vr.updateDebugPanel();
+                        vr.updateLeftDebugPanel();
+                    }
+                    vrEntryEl.style.display = 'none';
+                    vrHintsEl.style.display = 'none';
+                } else if (pc.isPCMode()) {
+                    // === PC 键鼠模式 ===
+                    pc.updatePCMode(dt);
+                    if (STATE.gameMode === 'laser') {
+                        if (!STATE.gameOverState) {
+                            game.checkLeftHandChoiceCardCollision();
+                            game.updateChoiceCards(dt);
+                            laser.updateLaserLevel(dt);
+                        }
+                    } else if (!STATE.gameOverState) {
+                        game.updateBullets(dt);
+                        game.updateBalloons(dt);
+                        game.updateWaveSpawning(dt);
+                        game.checkBulletBalloonCollisions();
+                        game.updateChoiceCards(dt);
+                        game.checkLeftHandChoiceCardCollision();
+                        game.updateBuddhaPalm(dt);
+                        game.checkVRSkySwitch();
                     }
                     game.updateTransitionClouds(dt);
                     if (!animate._frameCount) animate._frameCount = 0;

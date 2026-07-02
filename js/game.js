@@ -1085,5 +1085,6 @@ export const GameAPI = {
     spawnBalloons, restartLevel, gameOver,
     updateBuddhaPalm, attachBuddhaPalmToLeft, resetBuddhaPalm,
     initTransitionClouds, updateTransitionClouds, startCloudTransition,
-    balloons, bullets
+    balloons, bullets,
+    createKnightBalloon, createBalloon, shootBullet
 };
