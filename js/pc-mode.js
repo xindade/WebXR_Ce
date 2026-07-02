@@ -2,9 +2,9 @@
 // 用于桌面调试：WASD 移动、鼠标视角、左键射击
 // 与 vr.js 的接口兼容：复用 shootBullet / handleMovement / handleShooting
 import * as THREE from '../three.module.js';
-import { scene, dolly, camera, STATE, BOUND_X, BOUND_Z, MOVE_SPEED, skyCycle } from './core.js';
-import { shootBullet, checkVRSkySwitch } from './game.js';
-import { applySkyTarget } from './core.js';
+import { scene, dolly, camera, STATE, BOUND_X, BOUND_Z, MOVE_SPEED, skyCycle, applySkyTarget } from './core.js';
+import { shootBullet } from './game.js';
+import { attachAK48 } from './vr.js';
 
 // PC 模式状态
 const PC = {
@@ -23,17 +23,37 @@ const PC = {
 // 创建虚拟控制器，shootBullet 会从 controller.matrixWorld 取枪口位置
 function createFakeController() {
     const ctrl = new THREE.Object3D();
-    // 把它放在相机正前方一点的位置（模拟"枪在手里"）
-    ctrl.position.set(0.15, -0.15, -0.25);
+    // 放在相机前方下方一点（FPS 标准"枪在右下"位置）
+    ctrl.position.set(0.18, -0.18, -0.4);
     camera.add(ctrl);
     return ctrl;
 }
 
 function createFakeGrip() {
     const grip = new THREE.Group();
-    grip.position.set(0.15, -0.15, -0.25);
+    grip.position.set(0.18, -0.18, -0.4);
     camera.add(grip);
     return grip;
+}
+
+// 主动挂载 AK48：清除上一轮残留的枪模型，再重新挂到当前虚拟 grip
+function ensureAK48Attached() {
+    // 清除可能残留的旧枪
+    if (STATE.ak48Mesh && STATE.ak48Mesh.parent) {
+        STATE.ak48Mesh.parent.remove(STATE.ak48Mesh);
+    }
+    STATE.ak48Attached = false;
+    STATE.ak48Mesh = null;
+    STATE.ak48BasePos = null;
+    STATE.ak48BaseRot = null;
+    // 调用 vr.js 的挂载函数
+    try {
+        if (window.__log) window.__log('PC 挂载 AK48 前: model=' + !!STATE.ak48Model + ' grip=' + !!STATE.rightGrip + ' attached=' + STATE.ak48Attached, 'i');
+        attachAK48();
+        if (window.__log) window.__log('PC 挂载 AK48 后: attached=' + STATE.ak48Attached + ' mesh=' + !!STATE.ak48Mesh, 's');
+    } catch (e) {
+        if (window.__log) window.__log('PC 挂载 AK48 失败: ' + e.message, 'e');
+    }
 }
 
 // ===================== 启动 / 退出 =====================
@@ -51,18 +71,21 @@ export function startPCMode() {
     camera.rotation.set(0, 0, 0);
 
     // 创建虚拟 controller / grip（让 vr.js 的 shootBullet / attachAK48 能用）
-    if (!STATE.rightController) {
+    if (!STATE.rightController || !STATE.rightController.parent) {
         STATE.rightController = createFakeController();
     }
-    if (!STATE.rightGrip) {
+    if (!STATE.rightGrip || !STATE.rightGrip.parent) {
         STATE.rightGrip = createFakeGrip();
     }
-    if (!STATE.leftGrip) {
+    if (!STATE.leftGrip || !STATE.leftGrip.parent) {
         STATE.leftGrip = createFakeGrip();
-        STATE.leftGrip.position.set(-0.15, -0.15, -0.25);
+        STATE.leftGrip.position.set(-0.18, -0.18, -0.4);
     }
     PC.fakeGun = STATE.rightController;
     PC.fakeGrip = STATE.rightGrip;
+
+    // 主动挂载 AK48（解决模型已加载但未挂载到虚拟 grip 的问题）
+    ensureAK48Attached();
 
     // 监听
     document.addEventListener('keydown', onKeyDown, false);

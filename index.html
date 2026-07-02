@@ -262,10 +262,6 @@
             // PC 模式隐藏日志面板（调试时可改这里）
             logPanelEl.style.display = 'none';
             pc.startPCGame(selectedLevel);
-            // 挂载 AK48 枪模型
-            setTimeout(() => {
-                try { vr.attachAK48(); } catch(e) { window.__log('PC模式挂枪失败: ' + e.message, 'w'); }
-            }, 100);
             // 初始化游戏内容
             setTimeout(() => {
                 if (STATE.gameMode === 'laser') {
