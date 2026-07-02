@@ -49,28 +49,17 @@ function ensureAK48Attached() {
     // 调用 vr.js 的挂载函数
     try {
         attachAK48();
-        // PC 模式下重新校正枪的局部位置和朝向（VR 模式下手柄 pose 会修正，PC 模式需要手动）
+        // PC 模式下重新校正枪的局部位置和朝向
+        // ⚠️ 注意：vr.js 的 updateGunRecoil() 每帧会用 ak48BasePos/BaseRot 覆盖 position/rotation
+        // 所以必须同时修改 ak48BasePos/BaseRot，否则会被覆盖回去
         if (STATE.ak48Mesh) {
-            // 让枪管朝 -Z（相机前方），枪身在右下方
-            STATE.ak48Mesh.position.set(0, -0.05, -0.3);
-            STATE.ak48Mesh.rotation.set(0, 0, 0);  // 移除 VR 模式下的奇怪 rotation
-            STATE.ak48BasePos = STATE.ak48Mesh.position.clone();
-            STATE.ak48BaseRot = STATE.ak48Mesh.rotation.clone();
-            if (window.__log) window.__log('PC AK48 已重置位置/朝向 (0,-0.05,-0.3)', 's');
-        }
-        if (window.__log) {
-            const gun = STATE.ak48Mesh;
-            const grip = STATE.rightGrip;
-            // 更新世界矩阵
-            dolly.updateMatrixWorld(true);
-            const gunWorld = gun ? new THREE.Vector3().setFromMatrixPosition(gun.matrixWorld) : null;
-            const camPos = camera.position;
-            const camWorld = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld);
-            window.__log('PC AK48: attached=' + STATE.ak48Attached +
-                         ' grip.parent=' + (grip && grip.parent ? grip.parent.type : 'null') +
-                         ' gun.parent=' + (gun && gun.parent ? gun.parent.type : 'null') +
-                         ' gunWorld=' + (gunWorld ? gunWorld.toArray().map(v=>v.toFixed(2)).join(',') : 'null') +
-                         ' camWorld=' + camWorld.toArray().map(v=>v.toFixed(2)).join(','), 'i');
+            const basePos = new THREE.Vector3(0, -0.05, -0.3);
+            const baseRot = new THREE.Euler(0, 0, 0);
+            STATE.ak48Mesh.position.copy(basePos);
+            STATE.ak48Mesh.rotation.copy(baseRot);
+            STATE.ak48BasePos = basePos;
+            STATE.ak48BaseRot = baseRot;
+            if (window.__log) window.__log('PC AK48 位置已重置: pos=' + basePos.toArray().map(v=>v.toFixed(2)).join(',') + ' (vr.updateGunRecoil 会用此值)', 's');
         }
     } catch (e) {
         if (window.__log) window.__log('PC 挂载 AK48 失败: ' + e.message, 'e');
@@ -217,11 +206,13 @@ const _right = new THREE.Vector3();
 export function updatePCMode(dt) {
     if (!PC.active) return;
 
-    // 1. 应用相机旋转：yaw 给 dolly，pitch 给 camera
+    // 应用相机旋转：yaw 给 dolly，pitch 给 camera
     dolly.rotation.y = PC.yaw;
     camera.rotation.x = PC.pitch;
     camera.rotation.y = 0;
     camera.rotation.z = 0;
+    // PC 模式下相机挂在 dolly 下，position 相对 dolly 设置即可（dolly.position 已为 0）
+    camera.position.set(0, 1.6, 0);
 
     // 强制更新世界矩阵（shootBullet 依赖 controller.matrixWorld）
     dolly.updateMatrixWorld(true);
