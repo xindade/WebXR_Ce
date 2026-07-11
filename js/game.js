@@ -1,4 +1,4 @@
-import * as THREE from '../three.module.js';
+﻿import * as THREE from '../three.module.js';
 
 // 音频模块注入（避免循环依赖，由 index.html 在初始化时设置）
 let audioModule = null;
@@ -27,9 +27,18 @@ import {
     applySkyTarget, skyCycle, skyBrightness,
     createCloud, clouds,
     TRANSITION_CLOUD_POSITIONS, TRANSITION_CLOUD_Y, TRANSITION_CLOUD_SCALE,
-    TRANSITION_SPEED, TRANSITION_DISAPPEAR_Z, TRANSITION_SPAWN_Z
+    TRANSITION_SPEED, TRANSITION_DISAPPEAR_Z, TRANSITION_SPAWN_Z,
+    // 选项卡气球相关常量
+    CHOICE_BALLOON_RADIUS, CHOICE_BALLOON_FLOAT_AMP, CHOICE_BALLOON_FLOAT_FREQ,
+    CHOICE_BALLOON_DISTANCE, CHOICE_BALLOON_SPACING, CHOICE_BALLOON_Y,
+    CHOICE_SELECT_WINDOW_START, CHOICE_SELECT_WINDOW_END, CHOICE_CLEANUP_DELAY, CHOICE_BALLOON_LIFETIME,
+    CHOICE_CARD_SIZE, CHOICE_CARD_OFFSET_Y
 } from './core.js';
 
+import { RARITIES, RARITIES_BOSS, getLevelType, pickRarityByWeight, ATTR_TYPES } from './shared.js';
+import { roundRect } from './core.js';
+
+// 属性类型定义（与 cards.js 保持一致）
 // ===================== 子弹系统 =====================
 export const bullets = [];
 const sharedBulletGeom = new THREE.SphereGeometry(0.02, 8, 8);
@@ -76,6 +85,10 @@ function fireOneBullet(controller) {
     bullet.userData.life = BULLET_LIFE;
     bullet.visible = true;
     bullets.push(bullet);
+    
+    if (STATE.choiceBalloonsActive) {
+        window.__log('🔫 [DEBUG] 发射子弹: pos=(' + origin.x.toFixed(2) + ',' + origin.y.toFixed(2) + ',' + origin.z.toFixed(2) + ')', 'i');
+    }
 }
 
 export function shootBullet(controller) {
@@ -177,6 +190,363 @@ export function disposeBalloon(b) {
         b.material.dispose();
     }
     balloonGroup.remove(b);
+}
+
+// ===================== 选项卡气球系统 =====================
+
+function createChoiceCardTexture(attr, rarity) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512; canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    const bg = rarity.bgColor;
+    ctx.fillStyle = `rgba(${bg[0]},${bg[1]},${bg[2]},0.92)`;
+    roundRect(ctx, 0, 0, 512, 256, 32);
+    ctx.fill();
+    ctx.strokeStyle = `#${rarity.color.toString(16).padStart(6, '0')}`;
+    ctx.lineWidth = 8;
+    roundRect(ctx, 4, 4, 504, 248, 28);
+    ctx.stroke();
+
+    ctx.fillStyle = `#${rarity.color.toString(16).padStart(6, '0')}`;
+    ctx.font = 'bold 52px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(attr.icon + ' ' + attr.label, 256, 80);
+
+    ctx.font = 'bold 68px monospace';
+    ctx.fillText(attr.formatValue(rarity.value), 256, 165);
+
+    ctx.font = '24px sans-serif';
+    ctx.fillText(rarity.name, 256, 210);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    return texture;
+}
+
+function createRefreshCardTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512; canvas.height = 160;
+    const ctx = canvas.getContext('2d');
+    const fee = 10 * Math.pow(2, STATE.choiceRefreshCount);
+    const onCooldown = STATE.choiceRefreshCooldown > 0;
+    ctx.fillStyle = onCooldown ? 'rgba(60,60,60,0.9)' : 'rgba(30,120,60,0.9)';
+    roundRect(ctx, 0, 0, 512, 160, 24);
+    ctx.fill();
+    ctx.strokeStyle = onCooldown ? '#666' : '#44dd88';
+    ctx.lineWidth = 5;
+    roundRect(ctx, 3, 3, 506, 154, 21);
+    ctx.stroke();
+
+    ctx.fillStyle = onCooldown ? '#888' : '#ffffff';
+    ctx.textAlign = 'center';
+    if (onCooldown) {
+        ctx.font = 'bold 40px monospace';
+        ctx.fillText('⏳ 冷却中', 256, 80);
+    } else {
+        ctx.font = 'bold 44px monospace';
+        ctx.fillText('🔄 刷新', 256, 70);
+        ctx.font = '28px sans-serif';
+        ctx.fillStyle = '#ffd700';
+        ctx.fillText('费用: ' + fee + '金币', 256, 120);
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    return texture;
+}
+
+export function createChoiceBalloon(x, y, z, attr, rarity, isRefresh = false) {
+    const group = new THREE.Group();
+    
+    // 创建气球
+    const balloonGeom = new THREE.SphereGeometry(CHOICE_BALLOON_RADIUS, 16, 16);
+    const balloonColor = isRefresh ? 0x44dd88 : rarity.color;
+    const balloonMat = new THREE.MeshStandardMaterial({
+        color: balloonColor,
+        roughness: 0.3,
+        metalness: 0.1,
+        emissive: balloonColor,
+        emissiveIntensity: 0.3
+    });
+    const balloon = new THREE.Mesh(balloonGeom, balloonMat);
+    balloon.position.set(0, 0, 0);
+    balloon.castShadow = true;
+    group.add(balloon);
+
+    // 创建选项卡卡片（挂在气球下方）
+    let cardTexture, cardHeight;
+    if (isRefresh) {
+        cardTexture = createRefreshCardTexture();
+        cardHeight = CHOICE_CARD_SIZE * 0.5;
+    } else {
+        cardTexture = createChoiceCardTexture(attr, rarity);
+        cardHeight = CHOICE_CARD_SIZE;
+    }
+    
+    const cardGeom = new THREE.PlaneGeometry(CHOICE_CARD_SIZE, cardHeight);
+    const cardMat = new THREE.MeshBasicMaterial({ 
+        map: cardTexture, 
+        transparent: true, 
+        side: THREE.DoubleSide 
+    });
+    const card = new THREE.Mesh(cardGeom, cardMat);
+    card.position.set(0, CHOICE_CARD_OFFSET_Y, 0);
+    card.lookAt(new THREE.Vector3(0, 0, 1));
+    group.add(card);
+
+    // 设置位置
+    group.position.set(x, y, z);
+
+    // 设置 userData
+    group.userData = {
+        isChoiceBalloon: true,
+        isRefresh: isRefresh,
+        attr: attr,
+        rarity: rarity,
+        active: true,
+        selected: false,
+        firstHitTime: 0,
+        hitCount: 0,
+        balloon: balloon,
+        card: card,
+        cardTexture: cardTexture,
+        initialY: y,
+        floatOffset: Math.random() * Math.PI * 2,
+        spawnTime: performance.now() * 0.001
+    };
+
+    scene.add(group);
+    STATE.choiceBalloons.push(group);
+    
+    window.__log('🎈 [DEBUG] ' + (isRefresh ? '🔄刷新' : attr.label) + ' 位置=(' + x.toFixed(2) + ',' + y.toFixed(2) + ',' + z.toFixed(2) + ')', 'i');
+    
+    return group;
+}
+
+export function spawnChoiceBalloons() {
+    if (STATE.choiceBalloonsActive) { window.__log('[DIAG] spawnChoiceBalloons 跳过: choiceBalloonsActive 已为 true', 'w'); return; }
+    window.__log('[DIAG] spawnChoiceBalloons 被调用! wave=' + STATE.waveNumber, 's');
+    clearChoiceBalloons();
+    // 清理原有的卡片系统
+    clearChoiceBalloons();
+    
+    STATE.choiceBalloonsActive = true;
+    STATE.choiceRefreshCooldown = 0;
+
+    const playerPos = dolly.position.clone();
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    forward.y = 0;
+    forward.normalize();
+
+    const spawnBase = playerPos.clone().add(forward.clone().multiplyScalar(CHOICE_BALLOON_DISTANCE));
+    
+    window.__log('🎈 [DEBUG] 选项卡气球生成: count=' + (shuffledAttrs.length + 1), 'i');
+
+    const levelType = getLevelType(STATE.waveNumber);
+    const rarities = levelType === 'boss' ? RARITIES_BOSS : RARITIES;
+
+    // 随机选择3个不同的属性
+    const shuffledAttrs = [...ATTR_TYPES].sort(() => Math.random() - 0.5);
+    
+    // 生成3个选项卡气球
+    for (let i = 0; i < 3; i++) {
+        const rarity = pickRarityByWeight(rarities);
+        const offsetX = (i - 1) * CHOICE_BALLOON_SPACING;
+        createChoiceBalloon(
+            spawnBase.x + offsetX,
+            CHOICE_BALLOON_Y,
+            spawnBase.z,
+            shuffledAttrs[i],
+            rarity,
+            false
+        );
+    }
+
+    // 生成刷新气球（在最右边）
+    createChoiceBalloon(
+        spawnBase.x + CHOICE_BALLOON_SPACING * 1.5,
+        CHOICE_BALLOON_Y,
+        spawnBase.z,
+        null,
+        null,
+        true
+    );
+
+    window.__log('🎈 选项卡气球生成完成', 's');
+}
+
+export function updateChoiceBalloons(dt) {
+    if (!STATE.choiceBalloonsActive) return;
+
+    const now = performance.now() * 0.001;
+
+    STATE.choiceBalloons.forEach(balloon => {
+        if (!balloon.userData.active) return;
+
+        // 悬浮飘动效果
+        const floatY = balloon.userData.initialY + Math.sin(now * CHOICE_BALLOON_FLOAT_FREQ + balloon.userData.floatOffset) * CHOICE_BALLOON_FLOAT_AMP;
+        balloon.position.y = floatY;
+
+        // 全局超时：存活超过 CHOICE_BALLOON_LIFETIME 秒自动清理
+        const aliveTime = now - (balloon.userData.spawnTime || 0);
+        if (aliveTime > CHOICE_BALLOON_LIFETIME) {
+            window.__log('⏰ 选项卡气球超时（' + aliveTime.toFixed(1) + '秒），自动清理进入下一波', 'w');
+            explodeChoiceBalloon(balloon);
+            setTimeout(() => {
+                STATE.choiceBalloons.forEach(b => {
+                    if (b !== balloon && b.userData.active) explodeChoiceBalloon(b);
+                });
+                clearChoiceBalloons();
+                STATE.nextWaveTimer = 1.0;
+            }, 300);
+            return;
+        }
+
+        // 更新选中检测窗口
+        if (balloon.userData.firstHitTime > 0) {
+            const elapsed = now - balloon.userData.firstHitTime;
+
+            // 窗口超时 → 重置计数器，允许玩家重新尝试
+            if (elapsed > CHOICE_SELECT_WINDOW_END) {
+                balloon.userData.firstHitTime = 0;
+                balloon.userData.hitCount = 0;
+                window.__log('⏰ 选择窗口超时（' + elapsed.toFixed(1) + '秒），已重置', 'i');
+            }
+            // 在检测窗口内达到2次命中 → 选中该气球
+            else if (balloon.userData.hitCount >= 2 && 
+                elapsed >= CHOICE_SELECT_WINDOW_START) {
+                selectChoiceBalloon(balloon);
+            }
+        }
+    });
+}
+
+export function hitChoiceBalloon(balloon) {
+    if (!balloon.userData.active || balloon.userData.selected) return;
+
+    const now = performance.now() * 0.001;
+
+    // ---- 视觉反馈：闪白 + 粒子 ----
+    const balloonMesh = balloon.userData.balloon;
+    if (balloonMesh && balloonMesh.material) {
+        const origEmissive = balloonMesh.material.emissiveIntensity;
+        balloonMesh.material.emissiveIntensity = 1.5;
+        balloonMesh.material.emissive = new THREE.Color(0xffffff);
+        setTimeout(() => {
+            if (balloonMesh.material && balloon.userData.active) {
+                balloonMesh.material.emissiveIntensity = origEmissive;
+                balloonMesh.material.emissive.set(balloonMesh.material.color);
+            }
+        }, 120);
+    }
+    spawnParticles(balloon.position.clone(), 0xffdd44, 8);
+    playPop();
+
+    if (balloon.userData.firstHitTime === 0) {
+        // 第一次被击中
+        balloon.userData.firstHitTime = now;
+        balloon.userData.hitCount = 1;
+        window.__log('🎯 选项卡气球首次被击中: ' + 
+            'attr=' + (balloon.userData.attr ? balloon.userData.attr.label : 'refresh') +
+            ' pos=(' + balloon.position.x.toFixed(2) + ',' + balloon.position.y.toFixed(2) + ',' + balloon.position.z.toFixed(2) + ')', 'i');
+    } else {
+        balloon.userData.hitCount++;
+        window.__log('🔄 选项卡气球再次被击中: hitCount=' + balloon.userData.hitCount, 'i');
+    }
+}
+
+export function selectChoiceBalloon(selectedBalloon) {
+    if (!selectedBalloon.userData.active) return;
+
+    selectedBalloon.userData.selected = true;
+
+    if (selectedBalloon.userData.isRefresh) {
+        // 刷新气球：检查金币和冷却
+        if (STATE.choiceRefreshCooldown > 0) {
+            window.__log('⏳ 刷新冷却中', 'w');
+            return;
+        }
+        const fee = 10 * Math.pow(2, STATE.choiceRefreshCount);
+        if (STATE.playerStats.gold < fee) {
+            window.__log('💰 金币不足，刷新需 ' + fee + ' 金币', 'w');
+            return;
+        }
+        STATE.playerStats.gold -= fee;
+        STATE.choiceRefreshCount++;
+        STATE.choiceRefreshCooldown = 2;
+        window.__log('🔄 刷新选项卡气球', 's');
+        
+        // 重新生成选项卡气球
+        STATE.choiceBalloonsActive = false;
+        setTimeout(() => spawnChoiceBalloons(), 100);
+        return;
+    }
+
+    // 属性气球：应用属性
+    const attr = selectedBalloon.userData.attr;
+    const rarity = selectedBalloon.userData.rarity;
+    attr.apply(rarity.value);
+    window.__log('✅ 选择: ' + attr.label + ' ' + attr.formatValue(rarity.value) + ' (' + rarity.name + ')', 's');
+
+    // 选中的气球先爆炸
+    explodeChoiceBalloon(selectedBalloon);
+
+    // 延迟后清除其他气球
+    setTimeout(() => {
+        STATE.choiceBalloons.forEach(balloon => {
+            if (balloon !== selectedBalloon && balloon.userData.active) {
+                explodeChoiceBalloon(balloon);
+            }
+        });
+        clearChoiceBalloons();
+        STATE.nextWaveTimer = 1.0;
+    }, CHOICE_CLEANUP_DELAY * 1000);
+}
+
+function explodeChoiceBalloon(balloon) {
+    if (!balloon.userData.active) return;
+
+    balloon.userData.active = false;
+
+    // 创建爆炸粒子效果
+    const pos = balloon.position.clone();
+    spawnParticles(pos, balloon.userData.isRefresh ? 0x44dd88 : balloon.userData.rarity?.color || 0xffffff, 20);
+    spawnDebris(pos, balloon.userData.isRefresh ? 0x44dd88 : balloon.userData.rarity?.color || 0xffffff, 10);
+
+    // 移除气球
+    scene.remove(balloon);
+    
+    // 清理资源
+    balloon.traverse(child => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) {
+            if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+            else child.material.dispose();
+        }
+    });
+
+    playPop();
+}
+
+export function clearChoiceBalloons() {
+    STATE.choiceBalloons.forEach(balloon => {
+        if (balloon.userData.active) {
+            scene.remove(balloon);
+            balloon.traverse(child => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) {
+                    if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+                    else child.material.dispose();
+                }
+            });
+        }
+    });
+    STATE.choiceBalloons = [];
+    STATE.choiceBalloonsActive = false;
+}
+
+export function updateChoiceCooldowns(dt) {
+    if (STATE.choiceRefreshCooldown > 0) {
+        STATE.choiceRefreshCooldown = Math.max(0, STATE.choiceRefreshCooldown - dt);
+    }
 }
 
 export function spawnBalloons() {
@@ -371,14 +741,74 @@ export function updateBalloons(dt) {
         }
     }
     // 安全兜底：波次完成后自动推进（仅游戏进行中且无过渡计时器时）
+    if (!updateBalloons._diagCount) updateBalloons._diagCount = 0;
+    updateBalloons._diagCount++;
+    if (updateBalloons._diagCount === 1) {
+        window.__log('[DIAG] updateBalloons 兜底首次: gameStarted=' + STATE.gameStarted + ' gameMode=' + STATE.gameMode + ' wave=' + STATE.waveNumber, 's');
+    }
     if (STATE.gameStarted && STATE.nextWaveTimer === 0) {
         checkAllBalloonsDestroyed();
     }
 }
 
 export function checkBulletBalloonCollisions() {
+    // 调试日志：每60帧输出一次选项卡气球状态
+    if (!checkBulletBalloonCollisions._frameCount) checkBulletBalloonCollisions._frameCount = 0;
+    if (checkBulletBalloonCollisions._frameCount === 1) {
+        window.__log('[DIAG] checkBulletBalloonCollisions 首次调用: gameMode=' + STATE.gameMode + ' bullets=' + bullets.length + ' balloons=' + balloons.length, 's');
+    }
+    checkBulletBalloonCollisions._frameCount++;
+    const showDebug = checkBulletBalloonCollisions._frameCount % 60 === 1;
+    
+    if (showDebug && STATE.choiceBalloonsActive) {
+        const count = STATE.choiceBalloons.filter(b => b.userData.active).length;
+        if (count > 0) {
+            window.__log('🔍 [DEBUG] 选项卡气球状态: active=' + count + ', bullets=' + bullets.length, 'i');
+        }
+    }
+    
     for (let i = bullets.length - 1; i >= 0; i--) {
         const bullet = bullets[i];
+        if (!bullet.userData.active) continue;
+        
+        let hitSomething = false;
+        
+        // 先检测选项卡气球
+        for (let j = STATE.choiceBalloons.length - 1; j >= 0; j--) {
+            const choiceBalloon = STATE.choiceBalloons[j];
+            if (!choiceBalloon.userData.active) continue;
+            
+            // 检测子弹与选项卡气球的碰撞（气球部分）
+            const balloonMesh = choiceBalloon.userData.balloon;
+            // 获取balloonMesh在世界坐标系中的实际位置
+            const balloonWorldPos = new THREE.Vector3();
+            balloonMesh.getWorldPosition(balloonWorldPos);
+            const dist = bullet.position.distanceTo(balloonWorldPos);
+            
+            if (showDebug && dist < 10) {
+                const attrName = choiceBalloon.userData.isRefresh ? 'refresh' : (choiceBalloon.userData.attr ? choiceBalloon.userData.attr.label : '?');
+                window.__log('🔍 [DEBUG] 子弹→' + attrName + ': dist=' + dist.toFixed(3) + 
+                    ', bullet=(' + bullet.position.x.toFixed(3) + ',' + bullet.position.y.toFixed(3) + ',' + bullet.position.z.toFixed(3) + ')' +
+                    ', balloonLocal=(' + balloonMesh.position.x.toFixed(3) + ',' + balloonMesh.position.y.toFixed(3) + ',' + balloonMesh.position.z.toFixed(3) + ')' +
+                    ', balloonWorld=(' + balloonWorldPos.x.toFixed(3) + ',' + balloonWorldPos.y.toFixed(3) + ',' + balloonWorldPos.z.toFixed(3) + ')', 'i');
+            }
+            
+            if (dist < CHOICE_BALLOON_RADIUS + 0.05) {
+                hitChoiceBalloon(choiceBalloon);
+                hitSomething = true;
+                window.__log('🎯 [HIT] 子弹击中选项卡气球! dist=' + dist.toFixed(3) + ', radius=' + CHOICE_BALLOON_RADIUS, 'i');
+                break;
+            }
+        }
+        
+        if (hitSomething) {
+            bullet.userData.active = false;
+            bullet.visible = false;
+            bullets.splice(i, 1);
+            continue;
+        }
+        
+        // 检测普通气球
         for (let j = balloons.length - 1; j >= 0; j--) {
             const balloon = balloons[j];
             if (!balloon.userData.active) continue;
@@ -450,10 +880,12 @@ export function checkBulletBalloonCollisions() {
 }
 
 export function checkAllBalloonsDestroyed() {
-    if (STATE.gameMode !== 'shooting') return;  // intro6/laser 模式不放卡
+    if (STATE.gameMode !== 'shooting') { window.__log('[DIAG] checkAllBalloonsDestroyed 跳过: gameMode=' + STATE.gameMode, 'w'); return; }
     const activeBalloons = balloons.filter(b => b.userData.active);
-    if (activeBalloons.length === 0 && STATE.waveSpawnRemaining <= 0 && !STATE.choiceCardsActive) {
-        // 触发云朵转场
+    const remaining = STATE.waveSpawnRemaining;
+    const choiceActive = STATE.choiceBalloonsActive;
+    window.__log('[DIAG] 检测波次结束: active=' + activeBalloons.length + ' remaining=' + remaining + ' choiceActive=' + choiceActive + ' wave=' + STATE.waveNumber, 'i');
+    if (activeBalloons.length === 0 && remaining <= 0 && !choiceActive) {
         if (!STATE.transitionCloudActive) {
             startCloudTransition();
         }
@@ -462,7 +894,8 @@ export function checkAllBalloonsDestroyed() {
             window.__log('🎉 恭喜通关！游戏胜利', 's');
             return;
         }
-        spawnChoiceCards(false, lvlType);
+        window.__log('[DIAG] 触发 spawnChoiceBalloons! wave=' + STATE.waveNumber + ' lvlType=' + lvlType, 's');
+        spawnChoiceBalloons();
     }
 }
 
@@ -561,7 +994,6 @@ export function updateTransitionClouds(dt) {
     }
 }
 
-import { RARITIES, RARITIES_BOSS, getLevelType, spawnChoiceCards, clearChoiceCards, updateChoiceCards, checkLeftHandChoiceCardCollision, updateRefreshCardTexture } from './cards.js';
 import { attachBuddhaPalmToLeft, resetBuddhaPalm, updateBuddhaPalm, setBuddhaDeps } from './buddha.js';
 
 // 注入神掌需要的运行时依赖（避免循环 import）
@@ -596,7 +1028,7 @@ export function restartLevel() {
     STATE.wavePhase = 0;
     STATE.spawnBatchTimer = 0;
     setTimeout(() => {
-        spawnChoiceCards(false, getLevelType(STATE.waveNumber));
+        spawnChoiceBalloons();
         console.log('🎁 死亡补偿：赠送一次抽卡机会');
     }, 500);
 }
@@ -699,11 +1131,11 @@ export function updateCooldowns(dt) {
     const prevCd = STATE.choiceRefreshCooldown;
     if (STATE.choiceRefreshCooldown > 0) {
         STATE.choiceRefreshCooldown -= dt;
-        if (STATE.choiceCardsActive) updateRefreshCardTexture();
+        if (STATE.choiceCardsActive) updateChoiceBalloons(dt);
     }
     // 冷却结束瞬间刷新贴图（显示"刷新"而非"冷却0s"）
     if (prevCd > 0 && STATE.choiceRefreshCooldown <= 0 && STATE.choiceCardsActive) {
-        updateRefreshCardTexture();
+        // updateRefreshCardTexture removed — old card system deprecated
     }
     // 波次过渡倒计时
     if (STATE.nextWaveTimer > 0) {
@@ -760,12 +1192,13 @@ function cycleSky(direction = 1) {
 export const GameAPI = {
     setAudio, setVR,
     updateCooldowns, updateBullets, updateBalloons, updateWaveSpawning,
-    updateChoiceCards, checkBulletBalloonCollisions, checkLeftHandChoiceCardCollision,
+    checkBulletBalloonCollisions,
     updateDebris, updateParticles, checkVRSkySwitch,
     spawnBalloons, restartLevel, gameOver,
-    spawnChoiceCards, clearChoiceCards,
     updateBuddhaPalm, attachBuddhaPalmToLeft, resetBuddhaPalm,
     initTransitionClouds, updateTransitionClouds, startCloudTransition,
     createKnightBalloon,
-    balloons, bullets
+    balloons, bullets,
+    // 选项卡气球相关
+    spawnChoiceBalloons, updateChoiceBalloons, clearChoiceBalloons, updateChoiceCooldowns
 };

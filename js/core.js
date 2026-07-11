@@ -2,24 +2,7 @@ import * as THREE from '../three.module.js';
 
 // ===================== 全局日志系统 =====================
 // 所有模块最先执行的代码，确保日志缓冲区在 DOM 加载前就能用
-if (!window.__logBuffer) window.__logBuffer = [];
-window.__log = function(msg, level = 'i') {
-    const entry = { msg, level, time: Date.now() };
-    window.__logBuffer.push(entry);
-    // 同时输出到 console 方便 PC 调试
-    const prefix = level === 'e' ? '❌' : level === 'w' ? '⚠️' : level === 's' ? '✅' : '🔹';
-    console.log(prefix, msg);
-    // 直接更新面板 DOM（即使模块加载失败也能看到）
-    try {
-        const panel = document.getElementById('log-panel');
-        if (panel) {
-            const ts = new Date(entry.time).toTimeString().slice(0, 8);
-            panel.innerHTML += '<span class="log-time">[' + ts + ']</span> <span class="log-' + level + '">' + msg + '</span>\n';
-            panel.scrollTop = panel.scrollHeight;
-        }
-    } catch(e) {}
-};
-
+// 日志系统由 logger.js 提供（ES Module 加载前已初始化）
 __log('core.js 模块开始加载', 's');
 
 // ===================== 常量配置 =====================
@@ -92,6 +75,25 @@ export const RAY_SPHERE_COLOR = 0x00ffff;      // 射线球颜色（青色）
 //   作用: 使射线从手柄向前方向略微上仰，方便瞄准正前方的选择卡片
 export const RAY_PITCH_ANGLE = 15;            // 射线俯仰角（度），与子弹一致
 export const RAY_CAST_DISTANCE = 5;            // 射线检测最大距离
+
+// ===================== 选项卡气球参数 =====================
+// 选项卡气球：波次结束后生成，玩家通过射击选择属性
+export const CHOICE_BALLOON_RADIUS = 0.4;       // 选项卡气球半径（比普通气球小）
+export const CHOICE_BALLOON_FLOAT_AMP = 0.15;   // 悬浮飘动幅度（米）
+export const CHOICE_BALLOON_FLOAT_FREQ = 2.0;   // 悬浮飘动频率（Hz）
+export const CHOICE_BALLOON_DISTANCE = 3;       // 选项卡气球距玩家距离（米）
+export const CHOICE_BALLOON_SPACING = 1.2;      // 选项卡气球之间的间距（米）
+export const CHOICE_BALLOON_Y = 2.5;            // 选项卡气球生成高度（米）
+
+// 选中检测时间窗口
+export const CHOICE_SELECT_WINDOW_START = 1.5;  // 首次命中后开始检测的时间（秒）
+export const CHOICE_SELECT_WINDOW_END = 2.5;    // 检测窗口结束时间（秒）
+export const CHOICE_CLEANUP_DELAY = 0.5;        // 选中后其他气球消失延迟（秒）
+export const CHOICE_BALLOON_LIFETIME = 15;      // 选项卡气球全局存活时间（秒），超时自动清理
+
+// 选项卡卡片（挂在气球下方）
+export const CHOICE_CARD_SIZE = 0.6;            // 选项卡卡片尺寸
+export const CHOICE_CARD_OFFSET_Y = -0.8;       // 卡片相对于气球的Y偏移（下方）
 
 export const AK48_SCALE = 0.6;
 // 枪支后坐力参数:
@@ -225,6 +227,12 @@ export const STATE = {
     transitionCloudPhase: 0, // 0=静止, 1=移出, 2=移入
     transitionCloudTimer: 0,
     nextWaveTimer: 0,       // 波次过渡倒计时(s)，取代 setTimeout
+
+    // 选项卡气球相关状态
+    choiceBalloonsActive: false,    // 是否处于选项卡气球选择阶段
+    choiceBalloons: [],             // 当前活跃的选项卡气球列表
+    choiceRefreshCount: 0,          // 刷新次数
+    choiceRefreshCooldown: 0,       // 刷新冷却时间
 
     // 游戏模式
     gameMode: 'shooting',   // 'shooting' | 'laser'

@@ -1,0 +1,100 @@
+
+</script>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>VR 动画录制工具</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#1a1a2e;overflow:hidden;font-family:'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;height:100vh;width:100vw;user-select:none;-webkit-user-select:none}
+canvas{display:block}
+
+#top-bar{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:25;display:none;gap:12px;align-items:center}
+.badge{padding:6px 16px;border-radius:20px;font-size:14px;font-weight:700;background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);color:#fff;white-space:nowrap}
+.badge-rec{background:rgba(220,30,30,0.7);color:#fff}
+.badge-pause{background:rgba(255,152,0,0.7);color:#fff;animation:pulse 1s infinite}
+.badge-idle{background:rgba(60,60,60,0.7);color:#aaa}
+.badge-done{background:rgba(76,175,80,0.7);color:#fff}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+
+#info-panel{position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:25;display:none;gap:14px}
+.info-card{background:rgba(0,0,0,0.55);backdrop-filter:blur(8px);border-radius:12px;padding:8px 16px;color:#fff;text-align:center;min-width:90px}
+.info-card .val{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+.info-card .lbl{font-size:11px;color:rgba(255,255,255,0.5);margin-top:2px}
+
+#loading{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:20px;z-index:100;display:flex;flex-direction:column;align-items:center;gap:12px}
+#loading-spinner{width:48px;height:48px;border:4px solid rgba(255,255,255,0.2);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+#enter-vr-btn{position:fixed;bottom:40px;left:50%;transform:translateX(-50%);z-index:20;padding:16px 44px;font-size:20px;font-weight:700;color:#fff;background:linear-gradient(135deg,#6c8eef,#4fc3f7);border:none;border-radius:50px;cursor:pointer;box-shadow:0 8px 30px rgba(108,142,239,0.5);display:none;text-transform:uppercase}
+#enter-vr-btn:hover{background:linear-gradient(135deg,#7da0ff,#5dd4ff);transform:translateX(-50%) translateY(-3px)}
+#enter-vr-btn:active{transform:translateX(-50%) scale(0.96)}
+
+#help-panel{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);z-index:15;display:none;gap:6px;flex-wrap:wrap;justify-content:center;max-width:90vw}
+.hint{background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);border-radius:14px;padding:5px 12px;color:#fff;font-size:12px;white-space:nowrap;opacity:0.8}
+.hint .key{color:#ffd700;font-weight:700}
+
+#export-banner{position:fixed;bottom:130px;left:50%;transform:translateX(-50%);z-index:25;background:rgba(0,0,0,0.85);backdrop-filter:blur(8px);border:1px solid #4caf50;border-radius:16px;padding:16px 28px;color:#fff;text-align:center;display:none;min-width:320px}
+#export-banner .title{font-size:18px;font-weight:700;color:#81c784}
+#export-banner .detail{font-size:13px;opacity:0.7;margin-top:6px}
+#export-banner .actions{margin-top:12px;display:flex;gap:12px;justify-content:center}
+#export-banner .actions button{padding:8px 24px;border:none;border-radius:30px;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.15s}
+#export-banner .actions .btn-dl{background:#81c784;color:#1a1a2e}
+#export-banner .actions .btn-dl:hover{background:#a5d6a7}
+#export-banner .actions .btn-retake{background:rgba(255,255,255,0.15);color:#fff}
+#export-banner .actions .btn-retake:hover{background:rgba(255,255,255,0.25)}
+
+#log-panel{position:fixed;left:0;top:0;width:38vw;height:100vh;z-index:50;pointer-events:none;background:rgba(0,0,0,0.85);color:#00ff88;font:11px/1.4 Consolas,'Courier New',monospace;padding:10px 12px;overflow-y:auto;border-right:1px solid rgba(0,255,136,0.15)}
+#log-panel::-webkit-scrollbar{width:4px}
+#log-panel::-webkit-scrollbar-thumb{background:#00ff88;border-radius:2px}
+.log-e{color:#ff4444}.log-w{color:#ffaa00}.log-s{color:#00ff88}.log-i{color:#88ccff}.log-time{color:#666}
+</style>
+</head>
+<body>
+
+<div id="loading"><div id="loading-spinner"></div><div>加载 Three.js CDN...</div></div>
+<button id="enter-vr-btn">🎬 进入 VR 录制</button>
+
+<div id="top-bar">
+  <span class="badge badge-idle" id="state-badge">⏸ 待命</span>
+  <span class="badge" id="fps-badge">60 FPS</span>
+</div>
+<div id="info-panel">
+  <div class="info-card"><div class="val" id="rec-time">0.00s</div><div class="lbl">录制时长</div></div>
+  <div class="info-card"><div class="val" id="rec-frames">0</div><div class="lbl">关键帧</div></div>
+  <div class="info-card"><div class="val" id="mag-pos" style="font-size:13px;">0, 0</div><div class="lbl">魔术师位置</div></div>
+</div>
+<div id="help-panel">
+  <span class="hint"><span class="key">⭕</span> 右摇杆→魔杖</span>
+  <span class="hint"><span class="key">A</span> 变大 <span class="key">B</span> 变小</span>
+  <span class="hint"><span class="key">⭕</span> 左摇杆→移动魔术师</span>
+  <span class="hint"><span class="key">X</span> 录制▶/⏸</span>
+  <span class="hint"><span class="key">Y</span> 结束⏹</span>
+  <span class="hint"><span class="key">Grip</span> 重置视角</span>
+</div>
+<div id="export-banner">
+  <div class="title">✅ 录制完成</div>
+  <div class="detail" id="export-detail"></div>
+  <div class="actions">
+    <button class="btn-dl" id="btn-download">📥 下载 JSON</button>
+    <button class="btn-retake" id="btn-retake">🔄 重新录制</button>
+  </div>
+</div>
+<div id="log-panel">日志面板</div>
+
+<!-- 从 CDN 加载 Three.js + 扩展（不依赖本地服务） -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/loaders/DRACOLoader.js';
+</body>
+</html>

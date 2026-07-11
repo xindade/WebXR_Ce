@@ -1,16 +1,9 @@
 import * as THREE from '../three.module.js';
 import { scene, dolly, STATE, BOUND_X, BOUND_Z, applySkyTarget,
-         clouds, balloonGroup, bulletGroup, particleGroup, debrisGroup, choiceCardGroup,
+         clouds, balloonGroup, bulletGroup, particleGroup, debrisGroup, choiceCardGroup,
          sunSprite, moonSprite, starLayers } from './core.js';
-import { GLTFLoader } from '../jsm/loaders/GLTFLoader.js';
-import { DRACOLoader } from '../jsm/loaders/DRACOLoader.js';
-
-// GLTF Loader
-const dracoLoader = new DRACOLoader();
-dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-dracoLoader.setDecoderConfig({ type: 'js' });
-const gltfLoader = new GLTFLoader();
-gltfLoader.setDRACOLoader(dracoLoader);
+// 使用共享 loader（从 loader.js 导入）
+import { gltfLoader } from './loader.js';
 
 // ===================== 可调参数 =====================
 //   全部参数开放，修改后本地刷新即可生效
@@ -28,7 +21,7 @@ export const LASER_CONFIG = {
     ],
 
     // ── 动画时长 ──
-    magicianDur: 9.3,       // 开场动画时长（秒，与 magician_spell_091026.json 匹配）
+    magicianDur: 37.1,       // 开场动画时长（秒，与 magician_spell_091026.json 匹配）
 
     // ── 激光参数 ──
     laserLengthPreScale: 16,
@@ -36,14 +29,14 @@ export const LASER_CONFIG = {
     collisionRadius: 0.15,
 
     // ── 魔术师 ──
-    magicianScale: 1.5,  magicianY: 4,
+    magicianScale: 1.5,  magicianY: 1.8,
 
     // ── 死亡反馈 ──
     freezeDuration: 1.0,       // 黑屏冻结时长（秒）
     blackoutDuration: 1.0,     // 漆黑时长（秒）
 
     // ── 过关/失败 ──
-    winZ: -3.5,  resetZ: 2.0,  maxFailures: 3,
+    winZ: -3.5,  resetZ: 0,  maxFailures: 3,
 };
 
 // ===================== 内部状态 =====================
@@ -208,7 +201,7 @@ function loadMagicianModel(callback) {
     gltfLoader.load('Model/魔术师.glb', (gltf) => {
         const mag = gltf.scene;
         mag.scale.setScalar(LASER_CONFIG.magicianScale);
-        mag.position.y = LASER_CONFIG.magicianY;
+        mag.position.set(0, 0, 0); // animation system controls position via parent group
         group.add(mag);
         gltfLoader.load('Model/魔术棒.glb', (gltf2) => {
             const wand = gltf2.scene;
@@ -221,9 +214,9 @@ function loadMagicianModel(callback) {
     }, undefined, () => {
         window.__log('⚠️ 魔术师.glb 未找到，使用占位', 'w');
         const placeholder = new THREE.Mesh(new THREE.SphereGeometry(0.6,8,6), new THREE.MeshBasicMaterial({ color:0x8844ff }));
-        placeholder.position.y = LASER_CONFIG.magicianY;
+        placeholder.position.set(0, 0, 0);
         const hat = new THREE.Mesh(new THREE.ConeGeometry(0.5,0.7,6), new THREE.MeshBasicMaterial({ color:0x222266 }));
-        hat.position.set(0, LASER_CONFIG.magicianY+0.5, 0);
+        hat.position.set(0, 0.5, 0); // animation controls position
         group.add(placeholder);
         group.add(hat);
         if (callback) callback(group);
@@ -233,7 +226,7 @@ function loadMagicianModel(callback) {
 // ===================== 施法动画数据 =====================
 function loadAnimationData(callback) {
     if (S.animData) { if (callback) callback(); return; }
-    fetch('Model/magician_spell_091026.json')
+    fetch('Model/magician_spell_20260703_192925.json')
         .then(r => r.json())
         .then(data => {
             S.animData = data.tracks;
@@ -423,16 +416,16 @@ export function updateLaserLevel(dt) {
             const mag = _lerpTrack(magTrack, t);
             const wand = _lerpTrack(wandTrack, t);
             // 魔术师：动画位置在 y≈1.2, z=-3，映射到场景 Y=cfg.magicianY, Z=0
-            const Y_OFFSET = cfg.magicianY - 1.2;
-            const Z_OFFSET = 3; // z=-3 → z=0
+            const Y_OFFSET = 0;
+            const Z_OFFSET = 0; // z=-3 → z=0
             S.magician.position.set(mag.pos[0], mag.pos[1] + Y_OFFSET, mag.pos[2] + Z_OFFSET);
             S.magician.quaternion.set(mag.rot[0], mag.rot[1], mag.rot[2], mag.rot[3]);
-            S.magician.scale.setScalar(mag.scl * cfg.magicianScale / 1.25); // 动画 scale=1.25，映射到配置 scale
+            S.magician.scale.setScalar(cfg.magicianScale); // 固定缩放，不依赖动画数据 // 动画 scale=1.25，映射到配置 scale
             // 魔术棒（相对魔术师的局部偏移）
             if (S.magicianWand) {
                 S.magicianWand.position.set(wand.pos[0], wand.pos[1], wand.pos[2]);
                 S.magicianWand.quaternion.set(wand.rot[0], wand.rot[1], wand.rot[2], wand.rot[3]);
-                S.magicianWand.scale.setScalar(wand.scl * cfg.magicianScale / 1.25);
+                S.magicianWand.scale.setScalar(wand.scl / 0.45); // 0.45是录制时的基准缩放
                 // 发光驱动：用 emissive 强度驱动材质 emissiveIntensity
                 if (S.magicianWandMat) {
                     const emTrack = wandTrack.emissive;
@@ -818,7 +811,7 @@ function onLaserCleared() {
     showShootingScene();
     cleanupLaserLevel();
     STATE.playerStats.gold += 500;
-    import('./cards.js').then(m => m.spawnChoiceCards(true));
+    import('./game.js').then(m => m.spawnChoiceBalloons());
     window.__log('💰 奖励: 全部传说选项卡+500金币', 's');
 }
 

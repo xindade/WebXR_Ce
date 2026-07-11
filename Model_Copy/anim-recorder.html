@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>VR 动画录制工具</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#1a1a2e;overflow:hidden;font-family:'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;height:100vh;width:100vw;user-select:none;-webkit-user-select:none}
+canvas{display:block}
+#top-bar{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:25;display:none;gap:12px;align-items:center}
+.badge{padding:6px 16px;border-radius:20px;font-size:14px;font-weight:700;background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);color:#fff;white-space:nowrap}
+.badge-rec{background:rgba(220,30,30,0.7);color:#fff}
+.badge-pause{background:rgba(255,152,0,0.7);color:#fff;animation:pulse 1s infinite}
+.badge-idle{background:rgba(60,60,60,0.7);color:#aaa}
+.badge-done{background:rgba(76,175,80,0.7);color:#fff}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+#info-panel{position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:25;display:none;gap:14px}
+.info-card{background:rgba(0,0,0,0.55);backdrop-filter:blur(8px);border-radius:12px;padding:8px 16px;color:#fff;text-align:center;min-width:90px}
+.info-card .val{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+.info-card .lbl{font-size:11px;color:rgba(255,255,255,0.5);margin-top:2px}
+#loading{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:20px;z-index:100;display:flex;flex-direction:column;align-items:center;gap:12px}
+#loading-spinner{width:48px;height:48px;border:4px solid rgba(255,255,255,0.2);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#enter-vr-btn{position:fixed;bottom:40px;left:50%;transform:translateX(-50%);z-index:20;padding:16px 44px;font-size:20px;font-weight:700;color:#fff;background:linear-gradient(135deg,#6c8eef,#4fc3f7);border:none;border-radius:50px;cursor:pointer;box-shadow:0 8px 30px rgba(108,142,239,0.5);display:none;text-transform:uppercase}
+#enter-vr-btn:hover{background:linear-gradient(135deg,#7da0ff,#5dd4ff);transform:translateX(-50%) translateY(-3px)}
+#enter-vr-btn:active{transform:translateX(-50%) scale(0.96)}
+#help-panel{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);z-index:15;display:none;gap:6px;flex-wrap:wrap;justify-content:center;max-width:90vw}
+.hint{background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);border-radius:14px;padding:5px 12px;color:#fff;font-size:12px;white-space:nowrap;opacity:0.8}
+.hint .key{color:#ffd700;font-weight:700}
+#export-banner{position:fixed;bottom:130px;left:50%;transform:translateX(-50%);z-index:25;background:rgba(0,0,0,0.85);backdrop-filter:blur(8px);border:1px solid #4caf50;border-radius:16px;padding:16px 28px;color:#fff;text-align:center;display:none;min-width:320px}
+#export-banner .title{font-size:18px;font-weight:700;color:#81c784}
+#export-banner .detail{font-size:13px;opacity:0.7;margin-top:6px}
+#export-banner .actions{margin-top:12px;display:flex;gap:12px;justify-content:center}
+#export-banner .actions button{padding:8px 24px;border:none;border-radius:30px;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.15s}
+#export-banner .actions .btn-dl{background:#81c784;color:#1a1a2e}
+#export-banner .actions .btn-dl:hover{background:#a5d6a7}
+#export-banner .actions .btn-retake{background:rgba(255,255,255,0.15);color:#fff}
+#export-banner .actions .btn-retake:hover{background:rgba(255,255,255,0.25)}
+#log-panel{position:fixed;left:0;top:0;width:38vw;height:100vh;z-index:50;pointer-events:none;background:rgba(0,0,0,0.85);color:#00ff88;font:11px/1.4 Consolas,'Courier New',monospace;padding:10px 12px;overflow-y:auto;border-right:1px solid rgba(0,255,136,0.15)}
+#log-panel::-webkit-scrollbar{width:4px}
+#log-panel::-webkit-scrollbar-thumb{background:#00ff88;border-radius:2px}
+.log-e{color:#ff4444}.log-w{color:#ffaa00}.log-s{color:#00ff88}.log-i{color:#88ccff}.log-time{color:#666}
+</style>
+</head>
+<body>
+
+<div id="loading"><div id="loading-spinner"></div><div>加载 CDN 资源...</div></div>
+<button id="enter-vr-btn">🎬 进入 VR 录制</button>
+
+<div id="top-bar">
+  <span class="badge badge-idle" id="state-badge">⏸ 待命</span>
+  <span class="badge" id="fps-badge">60 FPS</span>
+</div>
+<div id="info-panel">
+  <div class="info-card"><div class="val" id="rec-time">0.00s</div><div class="lbl">录制时长</div></div>
+  <div class="info-card"><div class="val" id="rec-frames">0</div><div class="lbl">关键帧</div></div>
+  <div class="info-card"><div class="val" id="mag-pos" style="font-size:13px;">0, 0</div><div class="lbl">魔术师位置</div></div>
+  <div class="info-card"><div class="val" id="wand-adj" style="font-size:13px;color:#4fc3f7;">OFF</div><div class="lbl">魔棒调整</div></div>
+</div>
+<div id="help-panel">
+  <span class="hint"><span class="key">⭕</span> 右摇杆→魔杖</span>
+  <span class="hint"><span class="key">A</span> 变大 <span class="key">B</span> 变小</span>
+  <span class="hint"><span class="key">⭕</span> 左摇杆→移动魔术师</span>
+  <span class="hint"><span class="key">X</span> 录制▶/⏸</span>
+  <span class="hint"><span class="key">Y</span> 结束⏹</span>
+  <span class="hint"><span class="key">Grip</span> 重置视角</span>
+</div>
+<div id="export-banner">
+  <div class="title">✅ 录制完成</div>
+  <div class="detail" id="export-detail"></div>
+  <div class="actions">
+    <button class="btn-dl" id="btn-download">📥 下载 JSON</button>
+    <button class="btn-retake" id="btn-retake">🔄 重新录制</button>
+  </div>
+</div>
+<div id="log-panel">日志面板</div>
+
+<!-- Three.js via CDN importmap -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from "three";
+import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/loaders/GLTFLoader.js";
+import { DRACOLoader } from "https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/loaders/DRACOLoader.js";
+
+// Make THREE/loaders globally accessible for event handlers
+window.THREE = THREE;
+console.log('Draco decoder path:', typeof dracoLoader !== 'undefined' ? 'set' : 'not set');
+
+
+// ===== Log =====
+var __log = function(msg, level) {
+  level = level || 'i';
+  try {
+    var panel = document.getElementById('log-panel');
+    if (panel) {
+      var ts = new Date().toTimeString().slice(0,8);
+      var line=document.createElement('div');var tsS=document.createElement('span');tsS.className='log-time';tsS.textContent='['+ts+'] ';var msgS=document.createElement('span');msgS.className='log-'+level;msgS.textContent=msg;line.appendChild(tsS);line.appendChild(msgS);panel.appendChild(line);
+      panel.scrollTop = panel.scrollHeight;
+      while (panel.childNodes.length > 200) panel.removeChild(panel.firstChild);
+    }
+  } catch(e){}
+  console.log('['+(level==='e'?'ERR':level==='w'?'WRN':'INF')+']', msg);
+};
+__log('工具初始化...', 's');
+
+// ===== Scene =====
+var scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a2a3a);
+scene.fog = new THREE.Fog(0x1a2a3a, 15, 40);
+var camera = new THREE.PerspectiveCamera(72, window.innerWidth/window.innerHeight, 0.1, 200);
+camera.position.set(0, 1.6, 0);
+var dolly = new THREE.Group();
+dolly.add(camera);
+var renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.0));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.prepend(renderer.domElement);
+scene.add(dolly);
+
+// ===== Lights =====
+scene.add(new THREE.AmbientLight(0x8899bb, 1.5));
+var dl = new THREE.DirectionalLight(0xffffff, 2.0);
+dl.position.set(10, 20, 5);
+dl.castShadow = true;
+scene.add(dl);
+scene.add(new THREE.HemisphereLight(0x87CEEB, 0x445566, 0.6));
+
+// ===== Field 4x8 =====
+var FX = 4, FZ = 8;
+(function(){
+  var g = new THREE.Group();
+  var gridMat = new THREE.LineBasicMaterial({ color:0x4a7aaa, transparent:true, opacity:0.45 });
+  var boldMat = new THREE.LineBasicMaterial({ color:0x6aaadd, transparent:true, opacity:0.7 });
+  function lineV(a, b, m) { var geom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(a[0],a[1],a[2]),new THREE.Vector3(b[0],b[1],b[2])]); g.add(new THREE.Line(geom, m)); }
+  var Y = 0.01;
+  for (var i = -FX; i <= FX; i++) { lineV([i,Y,-FZ],[i,Y,FZ], i===0?boldMat:gridMat); }
+  for (var i = -FZ; i <= FZ; i++) { lineV([-FX,Y,i],[FX,Y,i], i===0?boldMat:gridMat); }
+  var bMat = new THREE.LineBasicMaterial({ color:0x88ccff, transparent:true, opacity:0.85 });
+  lineV([-FX,Y,-FZ],[FX,Y,-FZ], bMat); lineV([FX,Y,-FZ],[FX,Y,FZ], bMat);
+  lineV([FX,Y,FZ],[-FX,Y,FZ], bMat); lineV([-FX,Y,FZ],[-FX,Y,-FZ], bMat);
+  var dot = new THREE.Mesh(new THREE.RingGeometry(0.05,0.15,24), new THREE.MeshBasicMaterial({ color:0xffdd44, transparent:true, opacity:0.3 }));
+  dot.rotation.x = -Math.PI/2; dot.position.y = Y+0.001; g.add(dot);
+  scene.add(g);
+  var grd = new THREE.Mesh(new THREE.PlaneGeometry(8, 16), new THREE.MeshBasicMaterial({ color:0x1a2a3a, transparent:true, opacity:0.15, side:THREE.DoubleSide }));
+  grd.rotation.x = -Math.PI/2; scene.add(grd);
+})();
+__log('4x8 场地已创建', 's');
+
+// ===== Models =====
+var magicianRoot = new THREE.Group();
+magicianRoot.position.set(0, 0, -2);
+scene.add(magicianRoot);
+var magicianModel = null, wandModel = null;
+var modelsOK = { m:false, w:false };
+
+// Draco decoder uses local files if served via HTTP, or CDN fallback
+var dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath('../draco/');
+dracoLoader.setDecoderConfig({ type: 'js' });
+
+// ===== Model helper =====
+function loadModel(name, url, container, scaleVal, onSuccess) {
+  var l = new GLTFLoader();
+  l.setDRACOLoader(dracoLoader);
+  l.load(url, function(gltf) {
+    var sc = gltf.scene;
+    sc.scale.setScalar(scaleVal || 1.5);
+    sc.traverse(function(c){ if(c.isMesh) { c.castShadow=true; c.receiveShadow=true; }});
+    if (container) container.add(sc); else scene.add(sc);
+    if (onSuccess) onSuccess(sc);
+  }, function(p) {
+    if (p.total > 0) document.getElementById('loading').innerHTML = '<div id="loading-spinner"></div><div>'+name+': '+(p.loaded/p.total*100).toFixed(0)+'%</div>';
+  }, function(err) {
+    // Try without Draco
+    __log(name+' Draco失败, 重试无Draco: '+(err&&err.message||''), 'w');
+    var l2 = new GLTFLoader();
+    l2.load(url, function(gltf) {
+      var sc = gltf.scene;
+      sc.scale.setScalar(scaleVal || 1.5);
+      sc.traverse(function(c){ if(c.isMesh) { c.castShadow=true; c.receiveShadow=true; }});
+      if (container) container.add(sc); else scene.add(sc);
+      if (onSuccess) onSuccess(sc);
+    }, undefined, function(err2) {
+      __log(name+' 加载彻底失败, 使用占位: '+(err2&&err2.message||''), 'e');
+      makePlaceholder(name, container, onSuccess);
+    });
+  });
+}
+function makePlaceholder(name, container, onSuccess) {
+  var g = new THREE.Group();
+  if (name === 'magician') {
+    g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.3,1.2,8), new THREE.MeshStandardMaterial({ color:0x8844ff }))).position.y=0.6;
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.18,8,6), new THREE.MeshStandardMaterial({ color:0xffcc88 }))).position.y=1.3;
+    g.add(new THREE.Mesh(new THREE.ConeGeometry(0.25,0.4,6), new THREE.MeshStandardMaterial({ color:0x222266 }))).position.y=1.55;
+    g.scale.setScalar(1.5); container.add(g); magicianModel = g;
+    modelsOK.m = true; if (onSuccess) onSuccess(g); checkAll();
+  } else {
+    g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.015,0.02,0.3,6), new THREE.MeshStandardMaterial({ color:0x8B4513 })));
+    var tip = new THREE.Mesh(new THREE.SphereGeometry(0.025,6,6), new THREE.MeshStandardMaterial({ color:0x44aaff, emissive:0x44aaff, emissiveIntensity:0.5 }));
+    tip.position.z=0.3; g.add(tip); g.scale.setScalar(1.2); if(magicianModel)magicianModel.add(g);else scene.add(g); wandModel=g;
+    modelsOK.w = true; if (onSuccess) onSuccess(g); checkAll();
+  }
+}
+function checkAll() {
+  if (modelsOK.m && modelsOK.w) {
+    document.getElementById('loading').style.display='none';
+    document.getElementById('enter-vr-btn').style.display='block';
+    __log('所有模型加载完成', 's');
+  }
+}
+
+// Build model URL relative to this HTML file
+var baseUrl = document.location.href.replace(/[^/]*$/, "") + "../Model/";
+
+var magTried = 0, wandTried = 0;
+function tryLoadMagician() {
+  if (magTried >= 1) { makePlaceholder('magician', magicianRoot); return; }
+  loadModel('magician', baseUrl+'魔术师'+'.glb', magicianRoot, 1.5, function(sc) {
+    magicianModel=sc; modelsOK.m=true; checkAll();
+    __log('魔术师模型加载成功', 's');
+  });
+}
+function tryLoadWand() {
+  if (wandTried >= 1) { makePlaceholder('wand'); return; }
+  loadModel('wand', baseUrl+'魔术棒'+'.glb', null, 1.5, function(sc) {
+    wandModel=sc; if(magicianModel)magicianModel.add(sc); modelsOK.w=true; checkAll();
+    __log('魔杖模型加载成功', 's');
+  });
+}
+
+// Start loading
+setTimeout(function() {
+  tryLoadMagician();
+  tryLoadWand();
+}, 100);
+
+// Retry once after 15s if model is still not loaded
+setTimeout(function() {
+  if (!modelsOK.m) { tryLoadMagician(); }
+  if (!modelsOK.w) { tryLoadWand(); }
+}, 15000);
+
+// ===== State =====
+var REC_STATE = { IDLE:0, RECORDING:1, PAUSED:2, DONE:3 };
+var recState = REC_STATE.IDLE;
+var recData, recTimer = 0, recFrameCount = 0, recFrameAccum = 0;
+var wandScale = 1.0, magicianPos = new THREE.Vector3(0, 0, -4), wandOffset = new THREE.Vector3(0,0,0), wandRotY = 0, wandAdjMode = false;
+var _recordedJSON = null, _recordedFileName = '';
+function resetRecData() { return { magician:{ times:[], positions:[], rotations:[], scale:[] }, wand:{ times:[], positions:[], rotations:[], scale:[], emissive:[], opacity:[] } }; }
+recData = resetRecData();
+var isVR = false, leftCtrl = null, rightCtrl = null, leftGrip = null, rightGrip = null;
+var btn = { l:{tr:0,gr:0,st:0,x:0,y:0,sx:0,sy:0}, r:{tr:0,gr:0,st:0,a:0,b:0,sx:0,sy:0} };
+var pbtn = JSON.parse(JSON.stringify(btn));
+var lockReady = true;
+
+function updateUI() {
+  document.getElementById('rec-time').textContent = recTimer.toFixed(2)+'s';
+  document.getElementById('rec-frames').textContent = recFrameCount;
+  document.getElementById('mag-pos').textContent = magicianPos.x.toFixed(1)+', '+magicianPos.z.toFixed(1);
+  document.getElementById('wand-adj').textContent = wandAdjMode ? 'POS:'+wandOffset.x.toFixed(2)+','+wandOffset.y.toFixed(2)+','+wandOffset.z.toFixed(2) : 'OFF';
+  var sb = document.getElementById('state-badge');
+  if (recState === REC_STATE.IDLE) { sb.textContent='⏸ 待命'; sb.className='badge badge-idle'; }
+  else if (recState === REC_STATE.RECORDING) { sb.textContent='\u25cf 录制中'; sb.className='badge badge-rec'; }
+  else if (recState === REC_STATE.PAUSED) { sb.textContent='⏸ 暂停'; sb.className='badge badge-pause'; }
+  else if (recState === REC_STATE.DONE) { sb.textContent='✅ 完成'; sb.className='badge badge-done'; }
+}
+function rising(hand, key) { return btn[hand][key] && !pbtn[hand][key]; }
+
+// ===== VR =====
+document.getElementById('enter-vr-btn').onclick = async function() {
+  if (this.disabled) return;
+  this.disabled = true; this.textContent = '连接中...';
+  try {
+    if (!navigator.xr) throw new Error('不支持 WebXR');
+    var session = null;
+    try { session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures:['local-floor'] }); }
+    catch(e) { session = await navigator.xr.requestSession('immersive-vr'); }
+    renderer.xr.enabled = true;
+    renderer.xr.setSession(session);
+    isVR = true;
+    this.style.display = 'none';
+    document.getElementById('help-panel').style.display = 'flex';
+    document.getElementById('top-bar').style.display = 'flex';
+    document.getElementById('info-panel').style.display = 'flex';
+    __log('VR 会话已建立', 's');
+    setupCtrl(0); setupCtrl(1);
+  } catch(e) {
+    __log('VR 失败: '+e.message, 'e');
+    this.disabled = false; this.textContent = '🎬 进入 VR 录制';
+    renderer.xr.enabled = false;
+  }
+};
+
+function setupCtrl(idx) {
+  var ctrl = renderer.xr.getController(idx);
+  var grip = renderer.xr.getControllerGrip(idx);
+  var tip = new THREE.Mesh(new THREE.SphereGeometry(0.02,8,8), new THREE.MeshBasicMaterial({ color: idx===1?0x00ffff:0xffaa00, transparent:true, opacity:0.7 }));
+  tip.position.set(0, -0.02, -0.05); grip.add(tip);
+  dolly.add(ctrl); dolly.add(grip);
+  if (idx === 1) { rightCtrl = ctrl; rightGrip = grip; }
+  else { leftCtrl = ctrl; leftGrip = grip; }
+}
+
+function pollInputs() {
+  var session = renderer.xr.getSession();
+  if (!session) return;
+  for (var h in btn) for (var k in btn[h]) if (k!=='sx'&&k!=='sy') pbtn[h][k]=btn[h][k];
+  for (var h in btn) { btn[h].tr=0; btn[h].gr=0; btn[h].st=0; btn[h].x=0; btn[h].y=0; btn[h].a=0; btn[h].b=0; btn[h].sx=0; btn[h].sy=0; }
+  if (!session.inputSources) return;
+  for (var s=0; s<session.inputSources.length; s++) {
+    var src=session.inputSources[s];
+    if (!src.gamepad) continue;
+    var gp=src.gamepad, hand=src.handedness;
+    var sx=0,sy=0; if(gp.axes.length>=4){sx=gp.axes[2];sy=gp.axes[3];}else if(gp.axes.length>=2){sx=gp.axes[0];sy=gp.axes[1];}
+    var tr=(gp.buttons[0]&&gp.buttons[0].value||0)>0.5?1:0;
+    var gr=gp.buttons[1]&&gp.buttons[1].pressed?1:0;
+    var st=gp.buttons[3]&&gp.buttons[3].pressed?1:0;
+    var a4=gp.buttons[4]&&gp.buttons[4].pressed?1:0;
+    var a5=gp.buttons[5]&&gp.buttons[5].pressed?1:0;
+    if(hand==='right'){btn.r.tr=tr;btn.r.gr=gr;btn.r.st=st;btn.r.sx=sx;btn.r.sy=sy;btn.r.a=a4;btn.r.b=a5;}
+    else{btn.l.tr=tr;btn.l.gr=gr;btn.l.st=st;btn.l.sx=sx;btn.l.sy=sy;btn.l.x=a4;btn.l.y=a5;}
+  }
+}
+
+function finishRecording() {
+  recState = REC_STATE.DONE;
+  var d=recData, n=d.magician.times.length;
+  if (n===0){__log('无帧', 'w'); recState=REC_STATE.IDLE; return;}
+  var dur=d.magician.times[n-1];
+  var now=new Date();
+  var ts=now.getFullYear()+('0'+(now.getMonth()+1)).slice(-2)+('0'+now.getDate()).slice(-2)+'_'+('0'+now.getHours()).slice(-2)+('0'+now.getMinutes()).slice(-2)+('0'+now.getSeconds()).slice(-2);
+  _recordedJSON={name:'magician_recording_'+ts,version:2,duration:dur,sampleCount:n,rawCount:n,tracks:{magician:{times:d.magician.times,positions:d.magician.positions,rotations:d.magician.rotations,scale:d.magician.scale},wand:{times:d.wand.times,positions:d.wand.positions,rotations:d.wand.rotations,scale:d.wand.scale,emissive:d.wand.emissive,opacity:d.wand.opacity}}};
+  _recordedFileName='magician_spell_'+ts+'.json';
+  document.getElementById('export-detail').textContent='时长 '+dur.toFixed(2)+'s \u00b7 '+n+' 帧 \u00b7 '+_recordedFileName;
+  document.getElementById('export-banner').style.display='block';
+  __log('完成! '+n+' 帧 '+dur.toFixed(2)+'s', 's');
+  updateUI();
+  setTimeout(downloadJSON, 600);
+}
+function downloadJSON() {
+  if(!_recordedJSON)return;
+  var blob=new Blob([JSON.stringify(_recordedJSON,null,2)],{type:'application/json'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');a.href=url;a.download=_recordedFileName;
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  setTimeout(function(){URL.revokeObjectURL(url);},5000);
+}
+document.getElementById('btn-download').onclick=downloadJSON;
+document.getElementById('btn-retake').onclick=function(){
+  recState=REC_STATE.IDLE;_recordedJSON=null;
+  document.getElementById('export-banner').style.display='none';
+  recData=resetRecData();recTimer=0;recFrameCount=0;recFrameAccum=0;updateUI();
+  __log('已重置', 's');
+};
+
+// ===== Main loop =====
+var clock=new THREE.Clock();
+function animate() {
+  var dt=Math.min(clock.getDelta(),0.1);
+  try{
+    if(renderer.xr.isPresenting){
+      if(!isVR) isVR=true;
+      pollInputs();
+      if(magicianRoot){
+        var cq=new THREE.Quaternion();camera.getWorldQuaternion(cq);
+        var ce=new THREE.Euler().setFromQuaternion(cq,'YXZ');
+        magicianRoot.quaternion.setFromEuler(new THREE.Euler(ce.x,-ce.y,0,'YXZ'));
+      }
+      var dz=0.2;
+      var lsx=Math.abs(btn.l.sx)>dz?btn.l.sx:0;
+      var lsy=Math.abs(btn.l.sy)>dz?btn.l.sy:0;
+      if(lsx!==0||lsy!==0){
+        var spd=3.0*dt;
+        var cf=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);cf.y=0;cf.normalize();
+        var cr=new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);cr.y=0;cr.normalize();
+        magicianPos.x+=(cf.x*(-lsy)+cr.x*lsx)*spd;
+        magicianPos.z+=(cf.z*(-lsy)+cr.z*lsx)*spd;
+        magicianPos.x=Math.max(-FX+0.5,Math.min(FX-0.5,magicianPos.x));
+        magicianPos.z=Math.max(-FZ+0.5,Math.min(FZ-0.5,magicianPos.z));
+        lockReady=false;
+      }else{lockReady=true;}
+      if(magicianRoot){magicianRoot.position.x=magicianPos.x;magicianRoot.position.z=magicianPos.z;}
+      if(rightGrip&&wandModel){
+        var wp=new THREE.Vector3();rightGrip.getWorldPosition(wp);
+        var wq=new THREE.Quaternion();rightGrip.getWorldQuaternion(wq);
+        if(!wandAdjMode){
+          // 转换世界位置到魔术师模型局部空间
+          var mwp2=new THREE.Vector3();magicianModel.getWorldPosition(mwp2);
+          var mwq2=new THREE.Quaternion();magicianModel.getWorldQuaternion(mwq2);
+          var inv2=mwq2.clone().invert();
+          var lp2=wp.clone().add(wandOffset).sub(mwp2).applyQuaternion(inv2);
+          wandModel.position.copy(lp2);
+          var wqAdj2=new THREE.Quaternion().setFromEuler(new THREE.Euler(0,wandRotY,0)).multiply(wq);
+          var lq2=inv2.clone().multiply(wqAdj2);
+          wandModel.quaternion.copy(lq2);
+          var wqAdj=new THREE.Quaternion().setFromEuler(new THREE.Euler(0,wandRotY,0)).multiply(wq);
+          wandModel.quaternion.copy(wqAdj);
+        }else{
+          // Adjust mode: stick moves wand position, grip+stick moves Y
+          var rsx=btn.r.sx, rsy=btn.r.sy;
+          if(Math.abs(rsx)>0.2){wandOffset.x+=rsx*0.02;updateUI();}
+          if(Math.abs(rsy)>0.2&&!btn.r.gr){wandOffset.z+=(-rsy)*0.02;updateUI();}
+          if(Math.abs(rsy)>0.2&&btn.r.gr){wandOffset.y+=(-rsy)*0.02;updateUI();}
+          var mwp3=new THREE.Vector3();magicianModel.getWorldPosition(mwp3);
+          var mwq3=new THREE.Quaternion();magicianModel.getWorldQuaternion(mwq3);
+          var inv3=mwq3.clone().invert();
+          var lp3=wp.clone().add(wandOffset).sub(mwp3).applyQuaternion(inv3);
+          wandModel.position.copy(lp3);
+        }
+        if(rising('r','a')){
+          if(wandAdjMode){wandRotY+=0.1;__log('旋转Y '+wandRotY.toFixed(1)+'rad','i');updateUI();}
+          else{wandScale=Math.min(3.0,wandScale+0.1);__log('放大 x'+wandScale.toFixed(1),'i');}
+        }
+        if(rising('r','b')){
+          if(wandAdjMode){wandRotY-=0.1;__log('旋转Y '+wandRotY.toFixed(1)+'rad','i');updateUI();}
+          else{wandScale=Math.max(0.2,wandScale-0.2);__log('缩小 x'+wandScale.toFixed(1),'i');}
+        }
+        wandModel.scale.setScalar(wandScale);
+      }
+      if(rising('l','x')){
+        if(recState===REC_STATE.IDLE||recState===REC_STATE.DONE){
+          recData=resetRecData();recTimer=0;recFrameCount=0;recFrameAccum=0;
+          recState=REC_STATE.RECORDING;
+          document.getElementById('export-banner').style.display='none';
+          __log('开始录制','s');
+        }else if(recState===REC_STATE.RECORDING){recState=REC_STATE.PAUSED;__log('暂停','w');}
+        else if(recState===REC_STATE.PAUSED){recState=REC_STATE.RECORDING;__log('继续','s');}
+        updateUI();
+      }
+      if(rising('r','tr')){wandAdjMode=!wandAdjMode;__log(wandAdjMode?'调整模式 ON (右摇杆偏移, Grip+Y=升降, A/B旋转)':'调整模式 OFF','s');updateUI();}
+      if(rising('l','y')&&(recState===REC_STATE.RECORDING||recState===REC_STATE.PAUSED))finishRecording();
+      if(recState===REC_STATE.RECORDING){
+        recTimer+=dt;recFrameAccum+=dt;
+        if(recFrameAccum>=1/60){
+          recFrameAccum-=1/60;
+          var mq=new THREE.Quaternion();
+          if(magicianRoot)magicianRoot.getWorldQuaternion(mq);
+          recData.magician.times.push(recTimer);
+          recData.magician.positions.push([0,1.6,-2]);
+          recData.magician.rotations.push([mq.x,mq.y,mq.z,mq.w]);
+          recData.magician.scale.push(1.25);
+          if(rightGrip&&magicianRoot&&wandModel){
+            var wp=new THREE.Vector3();rightGrip.getWorldPosition(wp);
+            var wq=new THREE.Quaternion();rightGrip.getWorldQuaternion(wq);
+            var mwp=new THREE.Vector3();magicianRoot.getWorldPosition(mwp);
+            var mwq=new THREE.Quaternion();magicianRoot.getWorldQuaternion(mwq);
+            var inv=mwq.clone().invert();
+            // 魔杖已经是 magicianModel 的子对象，直接记录 local 坐标
+            var lp2=[wandModel.position.x,wandModel.position.y,wandModel.position.z];
+            var lq2=[wandModel.quaternion.x,wandModel.quaternion.y,wandModel.quaternion.z,wandModel.quaternion.w];
+            recData.wand.times.push(recTimer);
+            recData.wand.positions.push(lp2);
+            recData.wand.rotations.push(lq2);
+            recData.wand.scale.push(0.45*wandScale);
+            recData.wand.emissive.push(0.5);
+            recData.wand.opacity.push(0.5);
+          }
+          recFrameCount++;
+          updateUI();
+        }
+      }
+      if(rising('l','gr')&&magicianRoot){
+        var fwd=new THREE.Vector3(0,0,-1).applyQuaternion(magicianRoot.quaternion);
+        dolly.position.copy(magicianRoot.position.clone().add(fwd.multiplyScalar(2.5)));
+        dolly.position.y+=1.6;
+        __log('视角已重置','s');
+      }
+    }else{isVR=false;}
+    renderer.render(scene,camera);
+  }catch(e){console.error(e);__log('Animate: '+e.message,'e');}
+}
+renderer.setAnimationLoop(animate);
+window.addEventListener('resize',function(){
+  camera.aspect=window.innerWidth/window.innerHeight;camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth,window.innerHeight);
+});
+
+</script>
+</body>
+</html>

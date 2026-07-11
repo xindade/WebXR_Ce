@@ -11,6 +11,7 @@ import {
     RECOIL_POS_AMPLITUDE, RECOIL_ROT_AMPLITUDE, RECOIL_DECAY,
     roundRect
 } from './core.js';
+import { gltfLoader } from './loader.js';
 import { shootBullet, attachBuddhaPalmToLeft } from './game.js';
 
 if (window.__log) window.__log('vr.js 模块加载完成', 's');
@@ -142,13 +143,6 @@ export function stopBackgroundMusic() {
     }
 }
 
-// ===================== 模型加载 =====================
-const dracoLoader = new DRACOLoader();
-dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-dracoLoader.setDecoderConfig({ type: 'js' });
-
-const gltfLoader = new GLTFLoader();
-gltfLoader.setDRACOLoader(dracoLoader);
 
 // AK48
 gltfLoader.load('Model/Ak48.glb', (gltf) => {
@@ -497,13 +491,23 @@ function drawLeftDebugPanel(info, countdown) {
 
 export function updateLeftDebugPanel() {
     if (!leftDebugPanel) return;
-    // 选项卡刷新提示
-    if (STATE.choiceCardsActive) {
+    // 选项卡气球状态
+    if (STATE.choiceBalloonsActive) {
+        const activeBalloons = STATE.choiceBalloons.filter(b => b.userData.active);
         const cdLeft = Math.max(0, STATE.choiceRefreshCooldown).toFixed(1);
+        let balloonInfo = [];
+        activeBalloons.forEach((b, idx) => {
+            const name = b.userData.isRefresh ? '🔄刷新' : (b.userData.attr ? b.userData.attr.label : '?');
+            const hitCount = b.userData.hitCount;
+            const firstHit = b.userData.firstHitTime > 0 ? 
+                ((performance.now() * 0.001 - b.userData.firstHitTime).toFixed(1) + 's') : '无';
+            balloonInfo.push(`${idx+1}. ${name} 命中=${hitCount} 计时=${firstHit}`);
+        });
         const info = [
-            `🎴 选择增益`,
-            `👇 触碰卡片选择`,
-            `🔄 触碰下方刷新${STATE.choiceRefreshCooldown > 0 ? ' 冷却' + cdLeft + 's' : ''}`
+            `🎈 选择增益（射击两次）`,
+            `🎯 射击气球选择`,
+            ...balloonInfo,
+            STATE.choiceRefreshCooldown > 0 ? `⏳ 刷新冷却 ${cdLeft}s` : `🔄 射击绿色刷新`
         ].join('\n');
         drawLeftDebugPanel(info);
         return;
