@@ -1,11 +1,13 @@
-import * as THREE from '../three.module.js';
+﻿import * as THREE from '../three.module.js';
 import { scene, dolly, STATE, BOUND_X, BOUND_Z, applySkyTarget,
-         clouds, balloonGroup, bulletGroup, particleGroup, debrisGroup, choiceCardGroup,
+         clouds, balloonGroup, bulletGroup, choiceCardGroup,
          sunSprite, moonSprite, starLayers } from './core.js';
 // 使用共享 loader（从 loader.js 导入）
 import { gltfLoader } from './loader.js';
+import { spawnBalloons, spawnChoiceBalloons } from './game.js';
 
-// ===================== 可调参数 =====================
+
+// ================================ 可调参数 =====================
 //   全部参数开放，修改后本地刷新即可生效
 //
 // 气球索引（在 groups[] 中的位置）:

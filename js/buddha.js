@@ -1,17 +1,16 @@
 import * as THREE from '../three.module.js';
 import {
     scene, dolly, camera, STATE, buddhaPalmGroup,
-    BUDDHA_COOLDOWN, BUDDHA_KILL_RADIUS, BUDDHA_DAMAGE, BUDDHA_FALL_DURATION, BUDDHA_PARTICLE_COUNT,
+    BUDDHA_COOLDOWN, BUDDHA_KILL_RADIUS, BUDDHA_DAMAGE, BUDDHA_FALL_DURATION,
     BUDDHA_HAND_SCALE, BUDDHA_HAND_POS, BUDDHA_HAND_ROT_X,
-    BUDDHA_FALL_START_SCALE, BUDDHA_FALL_END_SCALE, BUDDHA_FALL_HEIGHT, BUDDHA_FALL_FORWARD, BUDDHA_IMPACT_CLEANUP,
+    BUDDHA_FALL_START_SCALE, BUDDHA_FALL_END_SCALE, BUDDHA_FALL_HEIGHT, BUDDHA_FALL_FORWARD,
     BALLOON_SCORE, KNIGHT_SCORE
 } from './core.js';
 
 // 运行时注入：避免与 game.js 循环依赖
-let _balloons = null, _spawnDebris = null, _spawnParticles = null, _playPop = null;
-export function setBuddhaDeps(balloonsRef, spawnDebrisFn, spawnParticlesFn, playPopFn) {
-    _balloons = balloonsRef; _spawnDebris = spawnDebrisFn;
-    _spawnParticles = spawnParticlesFn; _playPop = playPopFn;
+let _balloons = null, _playPop = null;
+export function setBuddhaDeps(balloonsRef, playPopFn) {
+    _balloons = balloonsRef; _playPop = playPopFn;
 }
 
 // ===================== 如来神掌系统 =====================
@@ -87,20 +86,19 @@ export function updateBuddhaPalm(dt) {
                                 STATE.playerStats.gold += BALLOON_SCORE;
                             }
                             const debrisColor = b.userData.isKnight ? 0x888888 : (b.material.color ? b.material.color.getHex() : 0xff4444);
-                            _spawnDebris(b.position.clone(), debrisColor, b.userData.isKnight ? 12 : 8);
-                            _spawnParticles(b.position.clone(), debrisColor, 20);
                             _playPop();
                             killed++;
                         }
                     }
                 }
                 window.__log('🖐️ 如来神掌命中！击杀 ' + killed + ' 个气球', 's');
-                // 金色粒子爆炸
-                _spawnParticles(palmPos, 0xffd700, BUDDHA_PARTICLE_COUNT);
             }
         } else if (palmData.phase === 'impact') {
-            // 延迟后清理
-            if (palmData.timer > BUDDHA_IMPACT_CLEANUP) {
+            // 落地后 1 秒内缩放从 FALL_END_SCALE → 1.0，然后消失
+            const t = Math.min(palmData.timer / 1.0, 1);
+            const s = BUDDHA_FALL_END_SCALE + (1.0 - BUDDHA_FALL_END_SCALE) * t * t * (3 - 2 * t);
+            palmData.mesh.scale.setScalar(s);
+            if (t >= 1) {
                 palmData.mesh.traverse(c => {
                     if (c.geometry) c.geometry.dispose();
                     if (c.material) {

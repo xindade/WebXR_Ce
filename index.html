@@ -50,6 +50,11 @@
             box-shadow: 0 8px 30px rgba(33,150,243,0.5);
         }
         .vr-btn-alt:hover { background: linear-gradient(135deg, #42a5f5, #2196F3); }
+        .vr-btn-pc {
+            background: linear-gradient(135deg, #00897B, #00695C);
+            box-shadow: 0 8px 30px rgba(0,137,123,0.5);
+        }
+        .vr-btn-pc:hover { background: linear-gradient(135deg, #26a69a, #00897B); }
 
         #vr-hints {
             position: fixed; bottom: 130px; left: 50%; transform: translateX(-50%);
@@ -108,7 +113,7 @@
         /* ===== 日志面板 ===== */
         #log-panel {
             position: fixed; left: 0; top: 0; width: 42vw; height: 100vh;
-            z-index: 50; pointer-events: none;
+            z-index: 50; pointer-events: auto;
             background: rgba(0,0,0,0.88);
             color: #00ff88; font: 11px/1.4 'Consolas', 'Courier New', monospace;
             padding: 10px 12px; overflow-y: auto;
@@ -141,6 +146,7 @@
         <div id="btn-container">
             <button id="enter-vr-btn" class="vr-btn">🎈 正常开始游戏</button>
             <button id="enter-vr-left-hand" class="vr-btn vr-btn-alt">🔫 左手持枪模式</button>
+            <button id="enter-pc-btn" class="vr-btn vr-btn-pc">⌨️ PC 键鼠操作</button>
         </div>
         <div id="level-container">
             <div style="color:#fff;font-size:13px;letter-spacing:1px;margin-bottom:8px;text-align:center;opacity:0.7;">选择关卡</div>
@@ -168,7 +174,7 @@
         <!-- Logger (loaded before ES modules) -->
     <script src="js/logger.js"></script>
 
-    <!-- Main application -->
+<!-- Main application -->
     <script type="module" src="js/app.js"></script>
 </body>
 </html>

@@ -7,6 +7,7 @@
 
 window.__logBuffer = [];
 window.__logPaused = false;
+window.__vrActive = false;
 window.__MAX_LOG_LINES = 200;  // DOM 节点上限，超出移除最旧
 
 window.__logFreeze = function() { 
@@ -55,7 +56,10 @@ window.__log = function(msg, level) {
             line.appendChild(msgSpan);
             
             panel.appendChild(line);
-            panel.scrollTop = panel.scrollHeight;
+            // 仅在 VR 中自动滚到底部
+            if (window.__vrActive) {
+                panel.scrollTop = panel.scrollHeight;
+            }
             
             // 移除超出的旧节点
             while (panel.childNodes.length > window.__MAX_LOG_LINES) {

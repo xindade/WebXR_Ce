@@ -19,10 +19,9 @@ import {
     CHOICE_CARD_SPACING, CHOICE_REFRESH_OFFSET_Y, CHOICE_CARD_Y_OFFSET,
     CHOICE_HIGHLIGHT_PULL, CHOICE_HIGHLIGHT_SCALE, CHOICE_HIGHLIGHT_LERP,
     RAY_PITCH_ANGLE, RAY_CAST_DISTANCE,
-    DEBRIS_COUNT, DEBRIS_LIFE, PARTICLE_COUNT, PARTICLE_LIFE,
-    BUDDHA_COOLDOWN, BUDDHA_KILL_RADIUS, BUDDHA_DAMAGE, BUDDHA_FALL_DURATION, BUDDHA_PARTICLE_COUNT,
+    BUDDHA_COOLDOWN, BUDDHA_KILL_RADIUS, BUDDHA_DAMAGE, BUDDHA_FALL_DURATION,
     BUDDHA_HAND_SCALE, BUDDHA_HAND_POS, BUDDHA_HAND_ROT_X,
-    BUDDHA_FALL_START_SCALE, BUDDHA_FALL_END_SCALE, BUDDHA_FALL_HEIGHT, BUDDHA_FALL_FORWARD, BUDDHA_IMPACT_CLEANUP,
+    BUDDHA_FALL_START_SCALE, BUDDHA_FALL_END_SCALE, BUDDHA_FALL_HEIGHT, BUDDHA_FALL_FORWARD,
     BOUND_X, BOUND_Z, balloonTex, buddhaPalmGroup,
     applySkyTarget, skyCycle, skyBrightness,
     createCloud, clouds,
@@ -37,6 +36,7 @@ import {
 
 import { RARITIES, RARITIES_BOSS, getLevelType, pickRarityByWeight, ATTR_TYPES } from './shared.js';
 import { roundRect } from './core.js';
+import { attachBuddhaPalmToLeft, resetBuddhaPalm, updateBuddhaPalm, setBuddhaDeps } from './buddha.js';
 
 // 属性类型定义（与 cards.js 保持一致）
 // ===================== 子弹系统 =====================
@@ -45,6 +45,9 @@ const sharedBulletGeom = new THREE.SphereGeometry(0.02, 8, 8);
 const sharedBulletMat = new THREE.MeshStandardMaterial({
     color: 0xffaa00, emissive: 0xff4400, emissiveIntensity: 0.8
 });
+// PC 模式专用：放大子弹便于桌面调试看清
+const sharedBulletGeomPC = new THREE.SphereGeometry(0.06, 12, 12);
+const sharedBulletMatPC = new THREE.MeshBasicMaterial({ color: 0xffff00 });
 const bulletPool = [];
 
 export function initBulletPool() {
@@ -74,7 +77,8 @@ function fireOneBullet(controller) {
     const origin = muzzleLocal.clone().applyMatrix4(controller.matrixWorld);
     const quat = controller.getWorldQuaternion(new THREE.Quaternion());
 
-    const bulletPitch = -30 * Math.PI / 180;
+    // PC 模式下相机水平朝前，不需要 -30° 下倾角；VR 模式下手柄略向上抬，需要 -30°
+    const bulletPitch = STATE.pcMode ? 0 : (-30 * Math.PI / 180);
     const localPitchQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(bulletPitch, 0, 0));
     const finalQuat = quat.clone().multiply(localPitchQuat);
     const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(finalQuat);
@@ -84,6 +88,14 @@ function fireOneBullet(controller) {
     bullet.userData.vel.copy(dir.normalize().multiplyScalar(BULLET_SPEED));
     bullet.userData.life = BULLET_LIFE;
     bullet.visible = true;
+    // PC 模式下用更大的子弹几何和明亮材质便于看清
+    if (STATE.pcMode) {
+        bullet.geometry = sharedBulletGeomPC;
+        bullet.material = sharedBulletMatPC;
+    } else {
+        bullet.geometry = sharedBulletGeom;
+        bullet.material = sharedBulletMat;
+    }
     bullets.push(bullet);
     
     if (STATE.choiceBalloonsActive) {
@@ -729,8 +741,8 @@ export function updateBalloons(dt) {
             STATE.shipHp -= BALLOON_DAMAGE;
             STATE.shipHitFlash = 0.3;
             const debrisColor = b.userData.isKnight ? 0x888888 : 0xff4444;
-            spawnDebris(b.position.clone(), debrisColor, b.userData.isKnight ? 12 : 8);
-            spawnParticles(b.position.clone(), 0xff4444, 15);
+
+
             playPop();
             console.log(`💥 气球撞船！船HP: ${STATE.shipHp}/${SHIP_MAX_HP}`);
             checkAllBalloonsDestroyed();
@@ -816,35 +828,6 @@ export function checkBulletBalloonCollisions() {
             const dist = bullet.position.distanceTo(balloon.position);
             if (dist < hitRadius + 0.05) {
                 balloon.userData.hp -= STATE.playerStats.atk;
-                // ---- 爆炸范围伤害 ----
-                if (STATE.explosionRadius > 0) {
-                    const blastDmg = STATE.playerStats.atk;
-                    const blastPos = bullet.position.clone();
-                    const blastRadius = STATE.explosionRadius;
-                    for (let k = balloons.length - 1; k >= 0; k--) {
-                        if (k === j) continue; // 跳过主目标
-                        const other = balloons[k];
-                        if (!other.userData.active) continue;
-                        if (blastPos.distanceTo(other.position) < blastRadius) {
-                            other.userData.hp -= blastDmg;
-                            if (other.userData.hp <= 0) {
-                                other.userData.active = false;
-                                if (other.userData.isKnight) {
-                                    other.traverse(c => { if (c.isMesh) c.visible = false; });
-                                    STATE.playerStats.score += KNIGHT_SCORE;
-                                    STATE.playerStats.gold += KNIGHT_SCORE;
-                                } else {
-                                    other.visible = false;
-                                    STATE.playerStats.score += BALLOON_SCORE;
-                                    STATE.playerStats.gold += BALLOON_SCORE;
-                                }
-                                const dColor = other.userData.isKnight ? 0x888888 : (other.material.color ? other.material.color.getHex() : 0xff4444);
-                                spawnDebris(other.position.clone(), dColor, 4);
-                            }
-                        }
-                    }
-                    spawnParticles(blastPos, 0xff6600, 15); // 橙色爆炸粒子
-                }
                 if (!balloon.userData.isKnight && balloon.material.emissiveIntensity !== undefined) {
                     balloon.material.emissiveIntensity = 0.5;
                     setTimeout(() => {
@@ -865,8 +848,7 @@ export function checkBulletBalloonCollisions() {
                         STATE.playerStats.gold += BALLOON_SCORE;
                     }
                     const debrisColor = balloon.userData.isKnight ? 0x888888 : (balloon.material.color ? balloon.material.color.getHex() : 0xff4444);
-                    spawnDebris(balloon.position.clone(), debrisColor, balloon.userData.isKnight ? 12 : 8);
-                    spawnParticles(balloon.position.clone(), debrisColor, 20);
+
                     playPop();
                 }
                 bullet.userData.active = false;
@@ -881,6 +863,7 @@ export function checkBulletBalloonCollisions() {
 
 export function checkAllBalloonsDestroyed() {
     if (STATE.gameMode !== 'shooting') { window.__log('[DIAG] checkAllBalloonsDestroyed 跳过: gameMode=' + STATE.gameMode, 'w'); return; }
+
     const activeBalloons = balloons.filter(b => b.userData.active);
     const remaining = STATE.waveSpawnRemaining;
     const choiceActive = STATE.choiceBalloonsActive;
@@ -896,6 +879,7 @@ export function checkAllBalloonsDestroyed() {
         }
         window.__log('[DIAG] 触发 spawnChoiceBalloons! wave=' + STATE.waveNumber + ' lvlType=' + lvlType, 's');
         spawnChoiceBalloons();
+
     }
 }
 
@@ -994,13 +978,6 @@ export function updateTransitionClouds(dt) {
     }
 }
 
-import { attachBuddhaPalmToLeft, resetBuddhaPalm, updateBuddhaPalm, setBuddhaDeps } from './buddha.js';
-
-// 注入神掌需要的运行时依赖（避免循环 import）
-setBuddhaDeps(balloons, spawnDebris, spawnParticles, playPop);
-
-// Re-export for vr.js named imports
-export { attachBuddhaPalmToLeft };
 
 // ===================== 死亡与重开 =====================
 export function gameOver() {
@@ -1029,101 +1006,9 @@ export function restartLevel() {
     STATE.spawnBatchTimer = 0;
     setTimeout(() => {
         spawnChoiceBalloons();
+
         console.log('🎁 死亡补偿：赠送一次抽卡机会');
     }, 500);
-}
-
-// ===================== 特效系统 =====================
-// 粒子
-const particlePool = [];
-export function initParticlePool() {
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
-        const geom = new THREE.SphereGeometry(0.01, 4, 4);
-        const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1.0 });
-        const mesh = new THREE.Mesh(geom, mat);
-        mesh.userData = { active: false, vel: new THREE.Vector3(), life: 0 };
-        mesh.visible = false;
-        particleGroup.add(mesh);
-        particlePool.push(mesh);
-    }
-    if (window.__log) window.__log('粒子池初始化 (' + PARTICLE_COUNT + ' 个)', 's');
-}
-initParticlePool();
-
-export function spawnParticles(position, color, count = 30) {
-    for (let i = 0; i < count; i++) {
-        const p = particlePool.find(p => !p.userData.active);
-        if (!p) break;
-        p.position.copy(position);
-        p.userData.active = true;
-        p.userData.life = PARTICLE_LIFE;
-        p.userData.vel.set((Math.random()-0.5)*2, (Math.random()-0.5)*2, (Math.random()-0.5)*2);
-        p.material.color.setHex(color);
-        p.material.opacity = 1.0;
-        p.visible = true;
-    }
-}
-
-export function updateParticles(dt) {
-    for (let i = 0; i < particlePool.length; i++) {
-        const p = particlePool[i];
-        if (!p.userData.active) continue;
-        p.position.addScaledVector(p.userData.vel, dt);
-        p.userData.vel.multiplyScalar(0.98);
-        p.userData.life -= dt;
-        p.material.opacity = Math.max(0, p.userData.life / PARTICLE_LIFE);
-        if (p.userData.life <= 0) { p.userData.active = false; p.visible = false; }
-    }
-}
-
-// 碎片
-const debrisPool = [];
-export function initDebrisPool() {
-    const geom = new THREE.TetrahedronGeometry(0.04, 0);
-    for (let i = 0; i < DEBRIS_COUNT; i++) {
-        const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1.0, side: THREE.DoubleSide });
-        const mesh = new THREE.Mesh(geom, mat);
-        mesh.userData = { active: false, vel: new THREE.Vector3(), rotVel: new THREE.Vector3(), life: 0 };
-        mesh.visible = false;
-        debrisGroup.add(mesh);
-        debrisPool.push(mesh);
-    }
-    if (window.__log) window.__log('碎片池初始化 (' + DEBRIS_COUNT + ' 个)', 's');
-}
-initDebrisPool();
-
-export function spawnDebris(position, color, count = 8) {
-    for (let i = 0; i < count; i++) {
-        const d = debrisPool.find(d => !d.userData.active);
-        if (!d) break;
-        d.position.copy(position);
-        const angle = Math.random() * Math.PI * 2;
-        const speed = 1.5 + Math.random() * 2.5;
-        const upBias = Math.random() * 1.5;
-        d.userData.vel.set(Math.cos(angle)*speed, upBias+Math.random()*2, Math.sin(angle)*speed);
-        d.userData.rotVel.set((Math.random()-0.5)*10, (Math.random()-0.5)*10, (Math.random()-0.5)*10);
-        d.userData.active = true;
-        d.userData.life = DEBRIS_LIFE;
-        d.material.color.setHex(color);
-        d.material.opacity = 1.0;
-        d.visible = true;
-    }
-}
-
-export function updateDebris(dt) {
-    for (let i = 0; i < debrisPool.length; i++) {
-        const d = debrisPool[i];
-        if (!d.userData.active) continue;
-        d.position.addScaledVector(d.userData.vel, dt);
-        d.userData.vel.y -= 4.0 * dt;
-        d.userData.vel.multiplyScalar(0.98);
-        d.rotation.x += d.userData.rotVel.x * dt;
-        d.rotation.y += d.userData.rotVel.y * dt;
-        d.rotation.z += d.userData.rotVel.z * dt;
-        d.userData.life -= dt;
-        d.material.opacity = Math.max(0, d.userData.life / DEBRIS_LIFE);
-        if (d.userData.life <= 0 || d.position.y < -2) { d.userData.active = false; d.visible = false; }
-    }
 }
 
 // ===================== 刷新冷却管理 =====================
@@ -1143,10 +1028,6 @@ export function updateCooldowns(dt) {
         if (STATE.nextWaveTimer <= 0) {
             STATE.nextWaveTimer = 0;
             STATE.waveNumber++;
-            // 神掌解锁（必须放在激光触发之前，避免选关2时被截胡）
-            if (STATE.waveNumber >= 1 && !STATE.buddhaPalmReady) {
-                attachBuddhaPalmToLeft();
-            }
             // 波次1清空后（waveNumber === 2）→ 进入激光关卡（跳过波次2射击）
             if (STATE.waveNumber === 2) {
                 STATE.gameMode = 'laser';
@@ -1155,22 +1036,12 @@ export function updateCooldowns(dt) {
                 balloons.length = 0;
                 return;
             }
-            // Boss关：生成2个骑士气球
-            if (getLevelType(STATE.waveNumber) === 'boss') {
-                window.__log('👑 第' + STATE.waveNumber + '波：Boss关！2个骑士气球', 's');
-                const knight1 = createKnightBalloon(-1.5, 2, -4);
-                const knight2 = createKnightBalloon(1.5, 2, -4);
-                // 不设波次生成定时器
-                // 击破后由 checkAllBalloonsDestroyed 处理抽卡
-            } else {
-                spawnBalloons();
-                window.__log('🎈 第' + STATE.waveNumber + '波气球已生成', 's');
+            if (STATE.waveNumber >= 1 && !STATE.buddhaPalmReady) {
+                attachBuddhaPalmToLeft();
             }
+            spawnBalloons();
+            window.__log('🎈 第' + STATE.waveNumber + '波气球已生成', 's');
         }
-    }
-    // 选关跳波次时，神掌模型可能延迟加载 → 每帧重试解锁
-    if (STATE.waveNumber >= 1 && STATE.buddhaPalmModel && !STATE.buddhaPalmReady) {
-        attachBuddhaPalmToLeft();
     }
 }
 
@@ -1187,8 +1058,10 @@ function cycleSky(direction = 1) {
     applySkyTarget(next);
 }
 
+// roundRect 在 core 中，但 createChoiceCard 需要异步 import，这里改用内联
 
 // ===================== 聚合导出 =====================
+// 聚合导出（避免 PICO 4 浏览器 import * as 兼容性问题）
 export const GameAPI = {
     setAudio, setVR,
     updateCooldowns, updateBullets, updateBalloons, updateWaveSpawning,
@@ -1201,4 +1074,5 @@ export const GameAPI = {
     balloons, bullets,
     // 选项卡气球相关
     spawnChoiceBalloons, updateChoiceBalloons, clearChoiceBalloons, updateChoiceCooldowns
+
 };

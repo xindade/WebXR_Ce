@@ -4,6 +4,7 @@ import { renderer, scene, camera, choiceCardGroup, setShadow, updateSkyTransitio
 import { GameAPI as game } from './game.js';
 import { VrAPI as vr } from './vr.js';
 import { LaserAPI as laser } from './laser-level.js';
+import { PCModeAPI as pc } from './pc-mode.js';
 import { startIntro6, updateIntro6, cleanUpIntro6, isIntro6Fighting } from './intro6.js';
 
 // Inject audio/VR modules into game (avoid circular dependency)
@@ -76,6 +77,45 @@ async function enterVR(isLeftHandMode = false) {
 
 enterVRBtn.onclick = () => enterVR(false);
 enterVRLeftHandBtn.onclick = () => enterVR(true);
+// ===== PC Mode =====
+const enterPCBtn = document.getElementById('enter-pc-btn');
+const logPanelEl = document.getElementById('log-panel');
+enterPCBtn.onclick = () => {
+    vrEntryEl.style.display = 'none';
+    vrHintsEl.style.display = 'none';
+    logPanelEl.style.display = 'none';
+    pc.startPCGame(selectedLevel);
+    setTimeout(() => {
+        if (STATE.gameMode === 'laser') {
+            laser.startLaserLevel();
+            laser._initialized = true;
+        } else if (STATE.waveNumber === 5 || STATE.waveNumber === 11) {
+            game.createKnightBalloon(-1.5, 2, -4);
+            game.createKnightBalloon(1.5, 2, -4);
+            createShootingGrid();
+            window.__log('Boss关：2个骑士气球', 's');
+        } else {
+            createShootingGrid();
+            game.spawnBalloons();
+            window.__log('PC 模式游戏开始 / 气球生成', 's');
+        }
+    }, 200);
+};
+
+window.__onExitPCMode = () => {
+    STATE.gameStarted = false;
+    STATE.waveNumber = 0;
+    STATE.gameOverState = false;
+    STATE.gameMode = 'shooting';
+    destroyShootingGrid();
+    laser.cleanupLaserLevel();
+    laser._initialized = false;
+    game.balloons.forEach(b => { if (b && b.parent) b.parent.remove(b); });
+    game.balloons.length = 0;
+    logPanelEl.style.display = 'block';
+    vrEntryEl.style.display = 'block';
+    vrHintsEl.style.display = 'flex';
+};
 
 // ===== Level Selection =====
 let selectedLevel = 0;
@@ -142,6 +182,20 @@ function animate() {
                 game.checkVRSkySwitch();
             }
             vr.updateGunRecoil();
+                    // Left stick Y scrolls log panel
+                    try {
+                        const gp = navigator.getGamepads();
+                        for (var gi = 0; gi < gp.length; gi++) {
+                            var g = gp[gi];
+                            if (g && g.axes) {
+                                var stickY = g.axes[1];
+                                if (Math.abs(stickY) > 0.1) {
+                                    var panel = document.getElementById('log-panel');
+                                    if (panel) panel.scrollTop += stickY * -8;
+                                }
+                            }
+                        }
+                    } catch(e) {}
             game.updateTransitionClouds(dt);
             game.updateDebris(dt);
             game.updateParticles(dt);
@@ -151,8 +205,26 @@ function animate() {
             }
             vrEntryEl.style.display = 'none';
             vrHintsEl.style.display = 'none';
-        } else {
-            vrEntryEl.style.display = 'block';
+        
+                } else if (pc.isPCMode()) {
+                    pc.updatePCMode(dt);
+                    if (STATE.gameMode === 'laser') {
+                        if (!STATE.gameOverState) { laser.updateLaserLevel(dt); }
+                    } else if (!STATE.gameOverState) {
+                        game.updateBullets(dt);
+                        game.updateBalloons(dt);
+                        game.updateWaveSpawning(dt);
+                        game.checkBulletBalloonCollisions();
+                        game.updateChoiceBalloons(dt);
+                        game.updateBuddhaPalm(dt);
+                        game.checkVRSkySwitch();
+                    }
+                    game.updateTransitionClouds(dt);
+                    if (animate._frameCount % 5 === 0) { vr.updateDebugPanel(); vr.updateLeftDebugPanel(); }
+                    vrEntryEl.style.display = 'none';
+                    vrHintsEl.style.display = 'none';
+            } else {
+                vrEntryEl.style.display = 'block';
             vrHintsEl.style.display = 'flex';
         }
     } catch (e) {
@@ -187,7 +259,9 @@ function initScene() {
 
 // ===== Session Events =====
 renderer.xr.addEventListener('sessionstart', () => {
-    window.__log('sessionstart 事件触发', 's');
+    window.__logPaused = false;
+            window.__vrActive = true;
+            window.__log('sessionstart 事件触发', 's');
     setShadow(false);
     setTimeout(() => vr.attachAK48(), 100);
     if (STATE.leftHandGunEnabled) {
@@ -238,7 +312,9 @@ renderer.xr.addEventListener('sessionstart', () => {
 });
 
 renderer.xr.addEventListener('sessionend', () => {
-    window.__log('sessionend 事件触发', 'w');
+    window.__vrActive = false;
+            window.__logPaused = true;
+            window.__log('sessionend 事件触发 - 日志已暂停', 's');
     setShadow(true);
     enterVRBtn.disabled = false;
     enterVRLeftHandBtn.disabled = false;
