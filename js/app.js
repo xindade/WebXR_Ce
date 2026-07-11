@@ -197,8 +197,8 @@ function animate() {
                         }
                     } catch(e) {}
             game.updateTransitionClouds(dt);
-            game.updateDebris(dt);
-            game.updateParticles(dt);
+            // game.updateDebris removed (particle system disabled)
+            // game.updateParticles removed (particle system disabled)
             if (animate._frameCount % 5 === 0) {
                 vr.updateDebugPanel();
                 vr.updateLeftDebugPanel();

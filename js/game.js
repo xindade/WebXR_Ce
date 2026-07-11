@@ -449,7 +449,7 @@ export function hitChoiceBalloon(balloon) {
             }
         }, 120);
     }
-    spawnParticles(balloon.position.clone(), 0xffdd44, 8);
+    // spawnParticles removed (particle system disabled)
     playPop();
 
     if (balloon.userData.firstHitTime === 0) {
@@ -520,8 +520,8 @@ function explodeChoiceBalloon(balloon) {
 
     // 创建爆炸粒子效果
     const pos = balloon.position.clone();
-    spawnParticles(pos, balloon.userData.isRefresh ? 0x44dd88 : balloon.userData.rarity?.color || 0xffffff, 20);
-    spawnDebris(pos, balloon.userData.isRefresh ? 0x44dd88 : balloon.userData.rarity?.color || 0xffffff, 10);
+    // spawnParticles removed (particle system disabled)
+    // spawnDebris removed (debris system disabled)
 
     // 移除气球
     scene.remove(balloon);
@@ -1066,7 +1066,7 @@ export const GameAPI = {
     setAudio, setVR,
     updateCooldowns, updateBullets, updateBalloons, updateWaveSpawning,
     checkBulletBalloonCollisions,
-    updateDebris, updateParticles, checkVRSkySwitch,
+    checkVRSkySwitch,
     spawnBalloons, restartLevel, gameOver,
     updateBuddhaPalm, attachBuddhaPalmToLeft, resetBuddhaPalm,
     initTransitionClouds, updateTransitionClouds, startCloudTransition,

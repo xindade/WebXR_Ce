@@ -67,7 +67,7 @@ const _hiddenGroups = [];
 function hideShootingScene() {
     _hiddenGroups.length = 0;
     const hide = (obj) => { if (obj && obj.visible !== undefined) { _hiddenGroups.push({ obj, visible: obj.visible }); obj.visible = false; } };
-    hide(balloonGroup); hide(bulletGroup); hide(particleGroup); hide(debrisGroup);
+    hide(balloonGroup); hide(bulletGroup); // particleGroup/debrisGroup removed
     clouds.forEach(c => hide(c));
     if (STATE.shipModel) hide(STATE.shipModel);
     hide(choiceCardGroup);

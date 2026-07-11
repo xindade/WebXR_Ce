@@ -1,4 +1,4 @@
-import * as THREE from '../three.module.js';
+﻿import * as THREE from '../three.module.js';
 
 // ===================== 全局日志系统 =====================
 // 所有模块最先执行的代码，确保日志缓冲区在 DOM 加载前就能用
@@ -225,8 +225,6 @@ export const STATE = {
     // 选项卡气球相关状态
     choiceBalloonsActive: false,    // 是否处于选项卡气球选择阶段
     choiceBalloons: [],             // 当前活跃的选项卡气球列表
-    choiceRefreshCount: 0,          // 刷新次数
-    choiceRefreshCooldown: 0,       // 刷新冷却时间
 
     // 游戏模式
     gameMode: 'shooting',   // 'shooting' | 'laser'
@@ -400,8 +398,8 @@ export const moonSprite = new THREE.Sprite(moonSpriteMat);
 moonSprite.scale.set(5, 5, 1);
 dolly.add(moonSprite);
 
-loadSpriteImage('image/sun.png', sunSpriteMat);
-loadSpriteImage('image/moon.png', moonSpriteMat);
+loadSpriteImage('image/sun.webp', sunSpriteMat);
+loadSpriteImage('image/moon.webp', moonSpriteMat);
 
 // 气球笑脸贴图
 export const balloonTex = new THREE.Texture();
@@ -411,7 +409,7 @@ balloonImg.onload = () => {
     balloonTex.colorSpace = THREE.SRGBColorSpace;
     balloonTex.needsUpdate = true;
 };
-balloonImg.src = 'image/smile.png';
+balloonImg.src = 'image/smile.webp';
 
 // 天空预设
 const DAY_SUN_AZ = Math.atan2(20, 10);

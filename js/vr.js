@@ -1,6 +1,4 @@
-import * as THREE from '../three.module.js';
-import { GLTFLoader } from '../jsm/loaders/GLTFLoader.js';
-import { DRACOLoader } from '../jsm/loaders/DRACOLoader.js';
+﻿import * as THREE from '../three.module.js';
 import {
     renderer, scene, dolly, camera, STATE,
     SHOOT_COOLDOWN, MOVE_SPEED, DEADZONE, BOUND_X, BOUND_Z,
